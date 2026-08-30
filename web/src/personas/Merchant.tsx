@@ -6,17 +6,22 @@ import type { PersonaProps } from '../App.tsx';
 
 /** The shop owner. Their questions, in order: am I reachable by AI buyers,
  *  what did they buy, and who exactly am I letting spend? */
-export default function MerchantView({ data, page, refresh, onBlocked }: PersonaProps) {
-  const shop = data.merchants[0];
+export default function MerchantView({ data, page, refresh, onBlocked, shopId, setShopId }: PersonaProps) {
+  const shop = data.merchants.find((m) => m.id === shopId) ?? data.merchants[0];
+  const picker = data.merchants.length > 1 ? (
+    <select className="shopsel" value={shop?.id ?? ''} onChange={(e) => setShopId(e.target.value)}>
+      {data.merchants.map((m) => <option key={m.id} value={m.id}>{m.name} · {m.products} products</option>)}
+    </select>
+  ) : undefined;
 
-  if (page === 'catalogue') return <Catalogue shop={shop} />;
+  if (page === 'catalogue') return <Catalogue shop={shop} picker={picker} />;
   if (page === 'orders') return <Orders orders={data.orders} loaded={data.loaded} />;
   if (page === 'assistants') return <Assistants data={data} onBlocked={onBlocked} refresh={refresh} />;
   if (page === 'record') return <Record data={data} />;
-  return <Overview shop={shop} data={data} refresh={refresh} onBlocked={onBlocked} />;
+  return <Overview shop={shop} picker={picker} data={data} refresh={refresh} onBlocked={onBlocked} />;
 }
 
-function Overview({ shop, data, refresh, onBlocked }: { shop?: Merchant } & Pick<PersonaProps, 'data' | 'refresh' | 'onBlocked'>) {
+function Overview({ shop, picker, data, refresh, onBlocked }: { shop?: Merchant; picker?: React.ReactNode } & Pick<PersonaProps, 'data' | 'refresh' | 'onBlocked'>) {
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
@@ -44,7 +49,7 @@ function Overview({ shop, data, refresh, onBlocked }: { shop?: Merchant } & Pick
       <PageHead
         title="AI Commerce Overview"
         sub={shop ? `${shop.name} · last read ${timeAgo(shop.ingestedAt)}` : 'No shop connected yet'}
-        right={shop ? <Pill tone="ok">AI Commerce active</Pill> : undefined}
+        right={<div className="row" style={{ gap: 10 }}>{picker}{shop && <Pill tone="ok">AI Commerce active</Pill>}</div>}
       />
 
       <div className="kpis" style={{ marginBottom: 16 }}>
@@ -96,14 +101,71 @@ function Overview({ shop, data, refresh, onBlocked }: { shop?: Merchant } & Pick
         {note && <div className="banner ok" style={{ marginTop: 16 }}>{note}</div>}
         {problem && <div className="banner bad" style={{ marginTop: 16 }}>{problem}</div>}
       </Card>
+
+      <div className="sechead">Latest AI orders</div>
+      <Card>
+        <Load loaded={data.loaded} items={data.orders.slice(0, 5)} rows={3} empty="No AI orders yet. Point an assistant at the link above.">{(rows) => (
+          <table>
+            <thead><tr><th>Amount</th><th>Status</th><th>Assistant</th><th>When</th></tr></thead>
+            <tbody>
+              {rows.map((o) => (
+                <tr key={o.id}>
+                  <td className="num" style={{ fontWeight: 600 }}>{o.amount}</td>
+                  <td>
+                    <Pill tone={statusTone(o.status)}>{statusWord(o.status)}</Pill>
+                    {o.failureReason && <div className="tiny" style={{ marginTop: 4 }}>{o.failureReason}</div>}
+                  </td>
+                  <td className="dim">{o.agentId ?? 'unregistered'}</td>
+                  <td className="dim">{timeAgo(o.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}</Load>
+      </Card>
+
+      <div className="sechead">Who is shopping here</div>
+      <Card>
+        <Load loaded={data.loaded} items={data.agents} rows={2} empty="No AI assistant has visited yet.">{(rows) => (
+          <table>
+            <thead><tr><th>Assistant</th><th>Identity</th><th>Per order</th><th>Per day</th></tr></thead>
+            <tbody>
+              {rows.map((a) => (
+                <tr key={a.id}>
+                  <td style={{ fontWeight: 600 }}>{a.label}</td>
+                  <td>{a.verified ? <Pill tone="ok">Verified</Pill> : <Pill tone="warn">Name only</Pill>}</td>
+                  <td className="num">{a.perOrderCap}</td>
+                  <td className="num">{a.dailyCap}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}</Load>
+      </Card>
+
+      <div className="sechead">Latest activity</div>
+      <Card>
+        {!data.loaded ? <Skeleton rows={4} /> : data.audit.slice(0, 6).map((row) => {
+          const p = describe(row);
+          return (
+            <div key={row.seq} style={{ display: 'grid', gridTemplateColumns: '80px minmax(0,1fr)', gap: 14, padding: '10px 0', borderTop: '1px solid var(--line-2)' }}>
+              <div className="tiny num">{timeAgo(row.ts)}</div>
+              <div>
+                <span style={{ fontWeight: 600 }}>{p.title}</span>
+                {row.outcome !== 'ok' && <span style={{ marginLeft: 8 }}><Pill tone={row.outcome === 'blocked' ? 'warn' : 'bad'}>{row.outcome === 'blocked' ? 'stopped' : 'failed'}</Pill></span>}
+              </div>
+            </div>
+          );
+        })}
+      </Card>
     </>
   );
 }
 
-function Catalogue({ shop }: { shop?: Merchant }) {
+function Catalogue({ shop, picker }: { shop?: Merchant; picker?: React.ReactNode }) {
   return (
     <>
-      <PageHead title="AI Catalogue" sub={shop ? `What AI buyers can see at ${shop.name}` : 'No shop connected'} />
+      <PageHead title="AI Catalogue" sub={shop ? `What AI buyers can see at ${shop.name}` : 'No shop connected'} right={picker} />
       <Card>
         {!shop ? <Empty>Connect a shop first.</Empty> : (
           <div className="kpis">

@@ -22,6 +22,8 @@ export interface Data {
 
 export interface PersonaProps {
   data: Data;
+  shopId: string;
+  setShopId: (id: string) => void;
   page: string;
   refresh: () => Promise<void>;
   onBlocked: () => void;
@@ -51,6 +53,7 @@ export default function App() {
   const [locked, setLocked] = useState(false);
   const [needToken, setNeedToken] = useState(false);
   const [err, setErr] = useState('');
+  const [shopId, setShopId] = useState('');
 
   const refresh = useCallback(async () => {
     try {
@@ -80,7 +83,15 @@ export default function App() {
   const paused = data.system?.killSwitch.engaged ?? false;
   const pending = data.approvals.length;
 
-  const shared: PersonaProps = { data, page, refresh, onBlocked: () => setNeedToken(true), watching };
+  // Default to the largest catalogue: a demo that opens on a 2-product fixture
+  // undersells a system that read 188 products from a real shop.
+  const shops = [...data.merchants].sort((a, b) => b.products - a.products);
+  const activeShop = shops.find((m) => m.id === shopId) ?? shops[0];
+
+  const shared: PersonaProps = {
+    data, page, refresh, onBlocked: () => setNeedToken(true), watching,
+    shopId: activeShop?.id ?? '', setShopId,
+  };
 
   return (
     <div className="app">
@@ -116,7 +127,7 @@ export default function App() {
       <div className={`body skin-${persona}`}>
         <nav className="side">
           <div className="sidehead">
-            <div className="t">{persona === 'merchant' ? (data.merchants[0]?.name ?? 'Your shop') : persona === 'shopper' ? 'AI Shopper' : 'Razorpay'}</div>
+            <div className="t">{persona === 'merchant' ? (activeShop?.name ?? 'Your shop') : persona === 'shopper' ? 'AI Shopper' : 'Razorpay'}</div>
             <div className="s">{persona === 'merchant' ? 'Merchant console' : persona === 'shopper' ? 'Your assistant' : 'AI Commerce · Platform'}</div>
           </div>
 
