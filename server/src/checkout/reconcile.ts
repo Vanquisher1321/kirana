@@ -55,7 +55,7 @@ export async function reconcile(opts: { limit?: number; rzpOptions?: CallOptions
   for (const row of rows) {
     report.checked++;
     try {
-      let captured: { id: string } | null = null;
+      let captured: { id: string; amountMinor?: number; currency?: string } | null = null;
       let failed: { id: string; code?: string; description?: string } | null = null;
       let authorizedOnly = false;
 
@@ -65,7 +65,7 @@ export async function reconcile(opts: { limit?: number; rzpOptions?: CallOptions
         const attempts = link.payments ?? [];
         const good = attempts.find((p) => p.status === 'captured');
         if (good) {
-          captured = { id: good.payment_id };
+          captured = { id: good.payment_id, amountMinor: good.amount };
         } else if (link.status === 'paid') {
           // Paid but the payment array is not populated yet: trust the status
           // and record the link id so the entry is still traceable.
@@ -81,7 +81,7 @@ export async function reconcile(opts: { limit?: number; rzpOptions?: CallOptions
         const { items } = await fetchOrderPayments(row.razorpay_order_id, opts.rzpOptions);
         const good = items.find((p) => p.status === 'captured');
         if (good) {
-          captured = { id: good.id };
+          captured = { id: good.id, amountMinor: good.amount, currency: good.currency };
         } else if (items.some((p) => p.status === 'authorized')) {
           authorizedOnly = true;
         } else {
@@ -97,6 +97,8 @@ export async function reconcile(opts: { limit?: number; rzpOptions?: CallOptions
           razorpayOrderId: row.razorpay_order_id ?? undefined,
           paymentId: captured.id,
           status: 'paid',
+          amountMinor: captured.amountMinor,
+          currency: captured.currency,
         });
         report.settled++;
       } else if (authorizedOnly) {

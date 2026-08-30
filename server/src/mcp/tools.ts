@@ -246,7 +246,12 @@ export function toolRequestApproval(ctx: ToolContext, args: { quote_id: string; 
 
 export function toolGetApproval(ctx: ToolContext, args: { consent_id: string }) {
   const c = getConsent(args.consent_id);
-  if (!c) return { error: 'not_found', message: `No approval ${args.consent_id}.` };
+  // Scoped like every other read: an agent may only see approvals for this
+  // merchant that were issued to it. Unscoped, this is the read primitive that
+  // turns a leaked consent id into someone else's spending power.
+  if (!c || c.scope !== ctx.merchantId || (c.agentId ?? null) !== (ctx.agentId ?? null)) {
+    return { error: 'not_found', message: `No approval ${args.consent_id}.` };
+  }
   const expired = Date.parse(c.expiresAt) <= Date.now() && c.status === 'pending';
   return {
     consent_id: c.id,

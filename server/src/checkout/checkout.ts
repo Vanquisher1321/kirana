@@ -92,8 +92,21 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutOutcome> {
        VALUES (?,?,?,?,?,?,?,?, 'created', ?, ?)`,
     ).run(orderId, input.merchantId, quote.id, input.consentId, input.agentId, input.idempotencyKey,
       quote.totalMinor, quote.currency, nowIso(), nowIso());
-  } catch {
-    const existing = db.prepare('SELECT id, status FROM orders WHERE idempotency_key = ?').get(input.idempotencyKey) as Record<string, unknown>;
+  } catch (err) {
+    const existing = db.prepare('SELECT id, status FROM orders WHERE idempotency_key = ?').get(input.idempotencyKey) as Record<string, unknown> | undefined;
+    if (!existing) {
+      // Not a duplicate — the insert failed for another reason (disk, lock).
+      // Treating that as "already processed" would silently swallow a real
+      // fault, so it is reported as a refusal with the actual cause.
+      record({
+        actor, action: 'checkout.failed', subjectId: orderId, outcome: 'failed',
+        detail: { reason: `could not record the order: ${(err as Error).message}` },
+      });
+      return {
+        ok: false, checks: decision.checks, blockedBy: 'storage',
+        reason: 'The order could not be recorded, so no payment was attempted.',
+      };
+    }
     record({
       actor, action: 'checkout.deduplicated', subjectId: String(existing.id), outcome: 'blocked',
       detail: { idempotencyKey: input.idempotencyKey, existingStatus: String(existing.status) },
@@ -208,7 +221,11 @@ export function listOrders(limit = 50): Record<string, unknown>[] {
 
 /** Applied by the Razorpay webhook once a real payment lands. */
 export function settleOrder(input: {
-  razorpayOrderId?: string; referenceId?: string; paymentId: string; status: 'paid' | 'failed'; failureReason?: string;
+  razorpayOrderId?: string; referenceId?: string; paymentId: string; status: 'paid' | 'failed';
+  failureReason?: string;
+  /** Paise actually captured, when the source reports it. */
+  amountMinor?: number;
+  currency?: string;
 }): string | null {
   // Match on the Razorpay order id when present, otherwise fall back to the
   // receipt/reference we generated -- payment-link events do not always carry
@@ -228,6 +245,25 @@ export function settleOrder(input: {
   }
 
   const orderId = String(row.id);
+
+  // An order is only "paid" when the amount actually captured matches what we
+  // charged. Without this, a webhook (or a link whose amount was edited) can
+  // settle a large order with a small payment -- the ledger would say paid and
+  // the money would not be there.
+  if (input.status === 'paid' && typeof input.amountMinor === 'number') {
+    const expected = Number((db.prepare('SELECT amount_minor, currency FROM orders WHERE id = ?').get(orderId) as { amount_minor: number; currency: string }).amount_minor);
+    const expectedCurrency = String((db.prepare('SELECT currency FROM orders WHERE id = ?').get(orderId) as { currency: string }).currency);
+    const currencyOk = !input.currency || input.currency === expectedCurrency;
+    if (input.amountMinor !== expected || !currencyOk) {
+      db.prepare("UPDATE orders SET failure_reason = ?, updated_at = ? WHERE id = ?")
+        .run(`amount mismatch: captured ${input.amountMinor} ${input.currency ?? ''} against ${expected} ${expectedCurrency}`, nowIso(), orderId);
+      record({
+        actor: 'system', action: 'settlement.amount_mismatch', subjectId: orderId, outcome: 'blocked',
+        detail: { paymentId: input.paymentId, captured: input.amountMinor, expected, capturedCurrency: input.currency ?? null, expectedCurrency },
+      });
+      return orderId;
+    }
+  }
 
   // Razorpay retries a webhook until it gets a 2xx, so the same event arrives
   // more than once as a matter of course. Re-applying an identical settlement

@@ -158,7 +158,7 @@ export function buildApp() {
     const body = request.body as { url?: string } | undefined;
     if (!body?.url) return reply.code(400).send({ error: 'url is required' });
     // Crawling is expensive for us and for the shop being read.
-    const limited = rateLimit('ingest', 10, 60_000);
+    const limited = rateLimit(`ingest:${request.ip || 'unknown'}`, 10, 60_000);
     if (!limited.ok) {
       return reply.code(429).send({ error: 'rate_limited', message: `Too many ingestions. Retry in ${Math.ceil(limited.retryAfterMs / 1000)}s.` });
     }
@@ -287,10 +287,16 @@ export function buildApp() {
     }
   });
 
-  app.post('/api/agents/:id/key', async (request) => {
+  app.post('/api/agents/:id/key', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const label = (request.body as { label?: string } | undefined)?.label ?? id;
-    const { agent, apiKey } = issueAgentKey(id, label);
+    const body = request.body as { label?: string; rotate?: boolean } | undefined;
+    let issued;
+    try {
+      issued = issueAgentKey(id, body?.label ?? id, 'console', { rotate: body?.rotate === true });
+    } catch (err) {
+      return reply.code(409).send({ error: 'already_keyed', message: (err as Error).message });
+    }
+    const { agent, apiKey } = issued;
     return {
       agent,
       apiKey,
@@ -342,13 +348,13 @@ export function buildApp() {
         });
         return reply.code(400).send({ error: 'invalid signature' });
       }
-    } else if (config.publicOrigin) {
+    } else if (!config.trustLocalWebhooks) {
       // Publicly reachable and unable to verify: refuse. Accepting unsigned
       // "payment captured" events from the open internet would let anyone mark
       // any order paid. The reconciler settles these orders safely anyway.
       record({
         actor: 'razorpay:webhook', action: 'webhook.refused', subjectId: null, outcome: 'blocked',
-        detail: { reason: 'server is publicly reachable but RAZORPAY_WEBHOOK_SECRET is not set' },
+        detail: { reason: 'RAZORPAY_WEBHOOK_SECRET is not set; unsigned webhooks are refused unless KIRANA_TRUST_LOCAL_WEBHOOKS=true' },
       });
       return reply.code(503).send({ error: 'webhook verification is not configured on this server' });
     } else {
@@ -373,6 +379,8 @@ export function buildApp() {
         referenceId: (link?.reference_id as string) ?? undefined,
         paymentId: String(payment.id),
         status: 'paid',
+        amountMinor: typeof payment.amount === 'number' ? payment.amount : undefined,
+        currency: typeof payment.currency === 'string' ? payment.currency : undefined,
       });
     } else if (event === 'payment.failed' && payment) {
       settleOrder({

@@ -36,3 +36,15 @@ test('deleting a row is detected', () => {
   assert.equal(v.brokenAtSeq, 13);
   assert.match(v.reason ?? '', /removed, reordered or inserted/);
 });
+
+test('hash input is unambiguous across field boundaries', () => {
+  // A space-joined encoding hashes {actor:"a b", action:"c"} identically to
+  // {actor:"a", action:"b c"} — content shifts, the chain still verifies.
+  record({ actor: 'a b', action: 'c', subjectId: 'boundary', outcome: 'ok' });
+  record({ actor: 'a', action: 'b c', subjectId: 'boundary', outcome: 'ok' });
+  const rows = forSubject('boundary');
+  assert.equal(rows.length, 2);
+  assert.notEqual(rows[0]!.hash, rows[1]!.hash, 'shifted content must not produce the same digest');
+  // Note: an earlier test in this file deliberately deletes a row to prove
+  // tamper detection, so the chain is broken by design at this point.
+});

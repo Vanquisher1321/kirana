@@ -83,6 +83,16 @@ if (!signingSecret) {
  * spend is still capped at ₹2,000 per order. The threat model in SECURITY.md
  * describes a real merchant's console; a sandbox anyone can drive is the point.
  */
+/**
+ * Accepting an UNSIGNED webhook must be an explicit opt-in, never an inference.
+ *
+ * This used to key on whether PUBLIC_ORIGIN was set — a cosmetic variable used
+ * for building links. Forgetting it on a public host silently turned "refuse
+ * unsigned webhooks" into "accept them", letting anyone mark any order paid.
+ * Safety now defaults on and must be deliberately switched off.
+ */
+const trustLocalWebhooks = opt('KIRANA_TRUST_LOCAL_WEBHOOKS', 'false') === 'true';
+
 const accessRaw = opt('KIRANA_ACCESS').toLowerCase();
 const access: 'demo' | 'locked' =
   accessRaw === 'demo' || accessRaw === 'locked'
@@ -93,6 +103,7 @@ export const config = {
   port: Number(opt('PORT', '3000')),
   access,
   isDemo: access === 'demo',
+  trustLocalWebhooks,
   publicOrigin: opt('PUBLIC_ORIGIN').replace(/\/+$/, ''),
   dbPath: opt('KIRANA_DB', 'data/kirana.db'),
   signingSecret,
@@ -120,8 +131,8 @@ export function describeConfig(): string[] {
   lines.push(`quote signing       ${config.signingIsEphemeral ? 'EPHEMERAL (set KIRANA_SIGNING_SECRET to persist across restarts)' : 'persistent secret'}`);
   lines.push(`console access      ${config.isDemo ? 'DEMO — open, no token needed (sandbox)' : 'LOCKED — token required to approve, connect or pause'}`);
   lines.push(`llm provider        ${config.llm.provider}${config.llm.provider === 'none' ? ' (structured-feed ingestion only)' : ''}`);
-  if (config.publicOrigin && !config.razorpay.webhookSecret) {
-    lines.push('WARNING             publicly reachable with no webhook secret — webhooks will be refused');
+  if (!config.razorpay.webhookSecret) {
+    lines.push(`razorpay webhooks   ${config.trustLocalWebhooks ? 'UNVERIFIED, explicitly trusted (local only!)' : 'refused — no secret set (the reconciler still settles orders)'}`);
   }
   if (config.consoleTokenGenerated && !config.isDemo) {
     lines.push('');

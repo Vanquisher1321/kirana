@@ -86,9 +86,14 @@ export function listAgents(): Agent[] {
 }
 
 /** Issues a real key. The plaintext is returned once and never stored. */
-export function issueAgentKey(agentId: string, label: string, by = 'human'): { agent: Agent; apiKey: string } {
+export function issueAgentKey(agentId: string, label: string, by = 'human', opts: { rotate?: boolean } = {}): { agent: Agent; apiKey: string } {
   const apiKey = newApiKey('kag');
   const existing = getAgent(agentId);
+  if (existing?.verified && !opts.rotate) {
+    // Re-issuing silently would let anyone who reaches this endpoint replace a
+    // trusted agent's credential and inherit its ceilings.
+    throw new Error(`Agent ${agentId} already has a key. Rotating it revokes the existing one; pass rotate to confirm.`);
+  }
   if (existing) {
     db.prepare('UPDATE agents SET api_key_hash = ?, verified = 1, label = ? WHERE id = ?').run(hashKey(apiKey), label, agentId);
   } else {
@@ -114,6 +119,12 @@ export function agentForKey(apiKey: string): Agent | null {
 export function setAgentCaps(agentId: string, perOrderMinor: number, dailyMinor: number, by = 'human'): Agent | null {
   const a = getAgent(agentId);
   if (!a) return null;
+  if (!Number.isSafeInteger(perOrderMinor) || perOrderMinor <= 0 || !Number.isSafeInteger(dailyMinor) || dailyMinor <= 0) {
+    throw new Error('Caps must be positive whole numbers of paise.');
+  }
+  if (perOrderMinor > dailyMinor) {
+    throw new Error('A per-order cap above the daily cap cannot be honoured.');
+  }
   if (!a.verified) {
     // Raising the ceiling on an identity nobody proved would let any caller
     // inherit it just by sending the same header value.

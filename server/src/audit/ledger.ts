@@ -37,10 +37,18 @@ interface HashInput {
   outcome: string; detail: string; prevHash: string;
 }
 
+/**
+ * Hash over a LENGTH-PREFIXED encoding, not a delimiter-joined string.
+ *
+ * Joining fields with a space means {actor: "a b", action: "c"} and
+ * {actor: "a", action: "b c"} hash identically, so content can be shifted
+ * across a field boundary while the chain still verifies. Length-prefixing
+ * makes the encoding unambiguous.
+ */
 function computeHash(i: HashInput): string {
-  return createHash('sha256')
-    .update([i.prevHash, i.ts, i.actor, i.action, i.subjectId ?? '', i.outcome, i.detail].join(' '))
-    .digest('hex');
+  const parts = [i.prevHash, i.ts, i.actor, i.action, i.subjectId ?? '', i.outcome, i.detail];
+  const encoded = parts.map((p) => `${Buffer.byteLength(p, 'utf8')}:${p}`).join('');
+  return createHash('sha256').update(encoded, 'utf8').digest('hex');
 }
 
 const insertStmt = db.prepare(

@@ -56,13 +56,27 @@ answers must be public, because which one gets used is not ours to choose; only
 check entirely.
 
 ### Agent identity is proven, not asserted
-`x-kirana-agent` is a name in a header — any caller can send any value. Agents
-sending only a name are registered as **unverified**, pinned to the
-conservative default caps, and their caps **cannot be raised**; otherwise
-anyone could inherit a trusted identity by copying a header. A real key
-(`x-kirana-agent-key`) is required for a verified agent. Keys are stored as
-SHA-256 hashes and shown exactly once. An unrecognised key is **rejected**, not
-silently downgraded.
+`x-kirana-agent` is a name in a header — any caller can send any value. A real
+key (`x-kirana-agent-key`) is required to be treated as that agent. Keys are
+stored as SHA-256 hashes and shown exactly once; an unrecognised key is
+**rejected**, not silently downgraded.
+
+Critically, **whether the caller proved its identity is carried explicitly**
+from the HTTP layer into the authorisation decision. An earlier version looked
+the claimed id up in the agents table and read its `verified` column — which
+answers the wrong question ("is there a verified agent by this name?") and let
+an impostor inherit a trusted agent's raised ceilings by typing its name. The
+guard now receives `identityProven`, set only when a key matched. An unproven
+caller gets the anonymous caps, shares the anonymous daily-spend pool, and
+cannot spend an approval issued to a verified agent.
+
+### Authorisation keys on the matched route, not the URL string
+`request.url` is the raw, undecoded target, while the router decodes and
+normalises before matching. `/%61pi/…`, `/API/…` and `//api/…` all reached the
+`/api/` handlers while a raw-string prefix test saw something that did not begin
+with `/api/`. All three bypassed the auth hook. It now keys on
+`request.routeOptions.url`, the canonical pattern the router actually matched,
+and there is a test firing those payloads at the kill switch.
 
 ### Price tampering
 Quotes are HMAC-signed over their contents and re-derived from live catalog
@@ -96,10 +110,33 @@ filesystem, so traversal is structurally impossible rather than filtered.
 `@fastify/static` was removed for this reason after it shipped four traversal
 advisories.
 
-### Resource exhaustion
-Fixed-window rate limits on the MCP surface (per agent) and on ingestion. Body
-size, product count, crawl pages, quote lines and item quantities are all
+### Resource exhaustion and brute force
+Fixed-window rate limits on the MCP surface, on ingestion (per source address,
+not one global bucket), and on **failed console authentication** — which also
+writes a `console.auth_failed` entry to the audit chain, so a credential-stuffing
+run leaves a trace rather than nothing. Rate-limit buckets key on a *proven*
+identity or the source address, never on a header the caller can rotate freely.
+Body size, product count, crawl pages, quote lines and item quantities are all
 bounded.
+
+### Settlement verifies the amount
+An order is marked paid only when the captured amount and currency match what
+was charged. Otherwise it records `settlement.amount_mismatch` and stays
+unsettled — without this, a webhook or an edited payment link could settle a
+large order with a small payment.
+
+### Unsigned webhooks are refused by default
+Accepting an unsigned webhook is an explicit opt-in
+(`KIRANA_TRUST_LOCAL_WEBHOOKS=true`), never inferred. It previously keyed on
+whether `PUBLIC_ORIGIN` happened to be set — a cosmetic variable used for
+building links — so forgetting it on a public host silently turned refusal into
+acceptance, letting anyone mark any order paid.
+
+### The audit hash is length-prefixed
+Fields are length-prefixed before hashing rather than joined by a delimiter.
+A space-joined encoding hashes `{actor: "a b", action: "c"}` identically to
+`{actor: "a", action: "b c"}`, so content could shift across a field boundary
+while the chain still verified.
 
 ### Information leakage
 Unexpected errors are logged, not returned. Config reporting shows whether a
@@ -125,3 +162,14 @@ credible.
   description. Mitigating that properly is unsolved industry-wide.
 - **Test mode only.** The server refuses live keys, so no defence here has been
   exercised against real money.
+- **DNS rebinding is not mitigated.** The SSRF guard resolves a hostname and
+  then `fetch` resolves it again independently, so a zero-TTL zone answering
+  public-then-private walks through. Fixing it properly means pinning the
+  validated address at connection time.
+- **The audit chain head is not externalised.** Anyone with write access to the
+  database file can recompute the whole chain and pass verification. The chain
+  proves nothing was edited *in place*; it does not defend against an attacker
+  who owns the file.
+- **The public sandbox is deliberately unauthenticated.** Test credentials only,
+  hard caps still enforced, and no real money can move — but anyone with the URL
+  can approve a spend or pause the demo.

@@ -34,7 +34,6 @@ const MIME: Record<string, string> = {
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
   '.ttf': 'font/ttf',
-  '.map': 'application/json; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
 };
 
@@ -73,6 +72,8 @@ export function loadBundle(root: string): StaticBundle {
         continue;
       }
       if (!entry.isFile()) continue;
+      // Source maps hand a reader the unminified original. Never bundled.
+      if (entry.name.endsWith('.map')) continue;
       const size = statSync(full).size;
       if (bytes + size > MAX_BYTES) continue;
       const ext = extname(entry.name).toLowerCase();
