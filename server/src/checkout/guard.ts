@@ -121,7 +121,9 @@ export function authorise(input: GuardInput): GuardResult {
   // 5. Consent: exists, alive, in scope, and covers the amount.
   const consent = getConsent(input.consentId);
   if (!add('consent_exists', 'A human must have approved this spend.', Boolean(consent),
-    consent ? `Granted by ${consent.grantedBy}` : 'No such consent')) {
+    !consent ? 'No such consent'
+      : consent.grantedBy ? `Granted by ${consent.grantedBy}`
+      : 'Requested, not yet approved')) {
     return fail('consent_exists', 'No human approval was found for this payment.');
   }
   const c = consent!;

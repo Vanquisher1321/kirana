@@ -170,6 +170,14 @@ CREATE INDEX IF NOT EXISTS idx_audit_subject ON audit_log(subject_id);
 
 db.exec(SCHEMA);
 
+// Additive migrations. SQLite has no ADD COLUMN IF NOT EXISTS, so each is
+// attempted and ignored when already applied.
+for (const stmt of [
+  'ALTER TABLE orders ADD COLUMN razorpay_payment_link_id TEXT',
+]) {
+  try { db.exec(stmt); } catch { /* already applied */ }
+}
+
 export function nowIso(): string {
   return new Date().toISOString();
 }

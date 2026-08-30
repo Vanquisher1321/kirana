@@ -134,9 +134,9 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutOutcome> {
     }, input.rzpOptions);
 
     db.prepare(
-      `UPDATE orders SET razorpay_order_id = ?, status = 'awaiting_payment', updated_at = ?,
-              failure_reason = NULL WHERE id = ?`,
-    ).run(rzpOrder.id, nowIso(), orderId);
+      `UPDATE orders SET razorpay_order_id = ?, razorpay_payment_link_id = ?,
+              status = 'awaiting_payment', updated_at = ?, failure_reason = NULL WHERE id = ?`,
+    ).run(rzpOrder.id, link.id, nowIso(), orderId);
 
     // The quote and the consent are both single-use. Burning them here means a
     // replay cannot ride the same approval into a second order.

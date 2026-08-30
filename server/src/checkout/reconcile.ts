@@ -1,7 +1,7 @@
 import { db, nowIso } from '../lib/db.ts';
 import { record } from '../audit/ledger.ts';
 import { settleOrder } from './checkout.ts';
-import { fetchOrderPayments, RazorpayError, CircuitOpenError, type CallOptions } from '../razorpay/client.ts';
+import { fetchOrderPayments, fetchPaymentLink, RazorpayError, CircuitOpenError, type CallOptions } from '../razorpay/client.ts';
 
 /**
  * Reconciliation: ask the gateway what actually happened.
@@ -18,6 +18,12 @@ import { fetchOrderPayments, RazorpayError, CircuitOpenError, type CallOptions }
  * paths can race without consequence.
  *
  * A useful side effect: the demo does not need a public tunnel at all.
+ *
+ * It also has to look in the right place. A Razorpay Order and a Payment Link
+ * are separate objects; a customer paying the link produces a payment against
+ * the LINK, and the order's payment list stays empty forever. Reconciling only
+ * against the order is a bug that shows up as "the customer definitely paid but
+ * the system says pending" -- so the link is checked first, and the order after.
  */
 
 export interface ReconcileReport {
@@ -40,39 +46,75 @@ export async function reconcile(opts: { limit?: number; rzpOptions?: CallOptions
 
   const cutoff = new Date(Date.now() - (opts.minAgeMs ?? MIN_AGE_MS)).toISOString();
   const rows = db.prepare(
-    `SELECT id, razorpay_order_id FROM orders
-     WHERE status = 'awaiting_payment' AND razorpay_order_id IS NOT NULL AND updated_at <= ?
+    `SELECT id, razorpay_order_id, razorpay_payment_link_id FROM orders
+     WHERE status = 'awaiting_payment' AND updated_at <= ?
+       AND (razorpay_order_id IS NOT NULL OR razorpay_payment_link_id IS NOT NULL)
      ORDER BY updated_at ASC LIMIT ?`,
-  ).all(cutoff, opts.limit ?? 25) as Array<{ id: string; razorpay_order_id: string }>;
+  ).all(cutoff, opts.limit ?? 25) as Array<{ id: string; razorpay_order_id: string | null; razorpay_payment_link_id: string | null }>;
 
   for (const row of rows) {
     report.checked++;
     try {
-      const { items } = await fetchOrderPayments(row.razorpay_order_id, opts.rzpOptions);
-      const captured = items.find((p) => p.status === 'captured');
-      const authorized = items.find((p) => p.status === 'authorized');
-      const failed = items.find((p) => p.status === 'failed');
+      let captured: { id: string } | null = null;
+      let failed: { id: string; code?: string; description?: string } | null = null;
+      let authorizedOnly = false;
+
+      // 1. The payment link is where a link-paid customer's money lands.
+      if (row.razorpay_payment_link_id) {
+        const link = await fetchPaymentLink(row.razorpay_payment_link_id, opts.rzpOptions);
+        const attempts = link.payments ?? [];
+        const good = attempts.find((p) => p.status === 'captured');
+        if (good) {
+          captured = { id: good.payment_id };
+        } else if (link.status === 'paid') {
+          // Paid but the payment array is not populated yet: trust the status
+          // and record the link id so the entry is still traceable.
+          captured = { id: attempts[0]?.payment_id ?? link.id };
+        } else {
+          const bad = attempts.find((p) => p.status === 'failed');
+          if (bad) failed = { id: bad.payment_id, code: 'payment_failed', description: 'The payment attempt did not complete.' };
+        }
+      }
+
+      // 2. Fall back to the order, for payments made against it directly.
+      if (!captured && row.razorpay_order_id) {
+        const { items } = await fetchOrderPayments(row.razorpay_order_id, opts.rzpOptions);
+        const good = items.find((p) => p.status === 'captured');
+        if (good) {
+          captured = { id: good.id };
+        } else if (items.some((p) => p.status === 'authorized')) {
+          authorizedOnly = true;
+        } else {
+          const bad = items.find((p) => p.status === 'failed');
+          if (bad && items.length === 1 && !failed) {
+            failed = { id: bad.id, code: bad.error_code ?? 'failed', description: bad.error_description ?? '' };
+          }
+        }
+      }
 
       if (captured) {
-        settleOrder({ razorpayOrderId: row.razorpay_order_id, paymentId: captured.id, status: 'paid' });
+        settleOrder({
+          razorpayOrderId: row.razorpay_order_id ?? undefined,
+          paymentId: captured.id,
+          status: 'paid',
+        });
         report.settled++;
-      } else if (authorized) {
+      } else if (authorizedOnly) {
         // Authorised but not captured is a real state, not a success. Leave it
         // pending rather than reporting money we do not have.
         report.stillPending++;
-      } else if (failed && items.length === 1) {
-        settleOrder({
-          razorpayOrderId: row.razorpay_order_id, paymentId: failed.id, status: 'failed',
-          failureReason: `${failed.error_code ?? 'failed'}: ${failed.error_description ?? ''}`,
-        });
+      } else if (failed) {
+        // A failed attempt does NOT close the order: the customer can simply
+        // try again on the same link, which is exactly what a human does after
+        // an OTP or 3-D Secure failure. Closing it here would strand a buyer
+        // who was one retry away from paying.
         report.failed++;
+        report.stillPending++;
       } else {
         report.stillPending++;
       }
     } catch (err) {
       if (err instanceof CircuitOpenError) {
-        // The gateway is already known to be unhealthy. Stop the sweep rather
-        // than spending the whole budget on calls that will not be sent.
         report.skipped = rows.length - report.checked + 1;
         report.errors.push('gateway circuit open; sweep stopped early');
         break;

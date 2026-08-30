@@ -137,7 +137,11 @@ export async function call<T>(path: string, opts: CallOptions = {}): Promise<T> 
 }
 
 export interface RzpOrder { id: string; amount: number; currency: string; receipt?: string; status: string; }
-export interface RzpPaymentLink { id: string; short_url: string; status: string; amount: number; reference_id?: string; }
+export interface RzpPaymentLink {
+  id: string; short_url: string; status: string; amount: number; amount_paid?: number;
+  reference_id?: string; order_id?: string;
+  payments?: Array<{ payment_id: string; status: string; amount: number; created_at?: number }> | null;
+}
 export interface RzpPayment { id: string; amount: number; currency: string; status: string; order_id?: string; error_code?: string | null; error_description?: string | null; }
 
 export function createOrder(input: {
@@ -179,4 +183,8 @@ export function fetchPayment(paymentId: string, opts: CallOptions = {}): Promise
 
 export function fetchOrderPayments(orderId: string, opts: CallOptions = {}): Promise<{ count: number; items: RzpPayment[] }> {
   return call<{ count: number; items: RzpPayment[] }>(`/orders/${orderId}/payments`, opts);
+}
+
+export function fetchPaymentLink(linkId: string, opts: CallOptions = {}): Promise<RzpPaymentLink> {
+  return call<RzpPaymentLink>(`/payment_links/${linkId}`, opts);
 }
