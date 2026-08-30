@@ -268,6 +268,47 @@ export function buildApp() {
   });
 
   // -------------------------------------------------------------------------
+  // MCP endpoint, one per merchant. This is the address a buyer agent talks to.
+  //
+  // Stateless: a fresh server and transport per request. There is no session
+  // state worth keeping between calls, and statelessness means a dropped tunnel
+  // or a restarted process never strands a buyer agent mid-conversation.
+  // -------------------------------------------------------------------------
+
+  app.all('/mcp/:slug', async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const merchant = getMerchant(slug);
+    if (!merchant) {
+      return reply.code(404).send({
+        jsonrpc: '2.0',
+        error: { code: -32001, message: `No merchant "${slug}" has been ingested on this server.` },
+        id: null,
+      });
+    }
+
+    if (request.method === 'GET' || request.method === 'DELETE') {
+      return reply.code(405).header('allow', 'POST').send({
+        jsonrpc: '2.0',
+        error: { code: -32000, message: 'This MCP endpoint is stateless; use POST.' },
+        id: null,
+      });
+    }
+
+    const agentId = (request.headers['x-kirana-agent'] as string | undefined) ?? null;
+    const server = buildMcpServer(merchant, agentId);
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+
+    reply.raw.on('close', () => {
+      void transport.close();
+      void server.close();
+    });
+
+    await server.connect(transport);
+    reply.hijack();
+    await transport.handleRequest(request.raw, reply.raw, request.body);
+  });
+
+  // -------------------------------------------------------------------------
   // The console. Served by the same process as the API so the whole demo is a
   // single command and a single port -- one less thing to go wrong on camera.
   // Run `npm run dev` in web/ instead while actually building the UI.
