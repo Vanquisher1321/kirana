@@ -62,7 +62,11 @@ function Home({ data, refresh, onBlocked }: Pick<PersonaProps, 'data' | 'refresh
           <div style={{ width: `${pct}%`, height: '100%', background: '#6EE7B7' }} />
         </div>
         <div className="row" style={{ gap: 12, marginTop: 20, paddingTop: 18, borderTop: '1px solid rgba(255,255,255,.1)' }}>
-          <div style={{ width: 30, height: 30, borderRadius: 9, background: 'rgba(99,102,241,.18)', color: '#A5B4FC', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}>⛨</div>
+          <div style={{ width: 30, height: 30, borderRadius: 9, background: 'rgba(99,102,241,.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A5B4FC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+            </svg>
+          </div>
           <div>
             <div style={{ fontSize: 13, fontWeight: 600 }}>Per-order limit {inr(PER_ORDER_CAP_MINOR)}</div>
             <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>A hard limit the platform enforces — you cannot raise it, and neither can your assistant</div>

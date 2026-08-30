@@ -105,7 +105,7 @@ export default function App() {
             <i className={`livedot ${paused ? 'bad' : ''}`} />
             {paused ? 'Spending paused' : 'Live'}
           </span>
-          {demo && <span className="live" style={{ color: '#FCD34D', borderColor: '#3F3520' }}>Sandbox · test mode</span>}
+          {demo && <span className="live sandbox">Sandbox · test mode</span>}
           {!demo && getToken() && (
             <button className="persona" onClick={() => { clearToken(); setLocked(true); }}>Lock</button>
           )}
