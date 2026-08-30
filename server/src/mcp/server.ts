@@ -24,10 +24,10 @@ export function buildMcpServer(merchant: Merchant, agentId: string | null): McpS
   const ctx: ToolContext = { merchantId: merchant.id, agentId };
 
   const server = new McpServer(
-    { name: `kirana-${merchant.slug}`, version: '0.1.0' },
+    { name: `nexus-${merchant.slug}`, version: '0.1.0' },
     {
       instructions:
-        `You are connected to the storefront "${merchant.name}" (${merchant.originUrl}) through Kirana, ` +
+        `You are connected to the storefront "${merchant.name}" (${merchant.originUrl}) through Nexus, ` +
         `which makes ordinary merchants transactable by AI buyers.\n\n` +
         `Prices are quoted in ${merchant.currency} and are exact. Always create a quote before ` +
         `attempting payment: a quote is cryptographically signed, expires in 10 minutes, and fixes the ` +

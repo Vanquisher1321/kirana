@@ -98,8 +98,8 @@ export default function App() {
       <header className="topbar">
         <div className="row" style={{ gap: 10 }}>
           <div className="mark">K</div>
-          <div className="brandname">Kirana</div>
-          <div className="brandsub">Agentic commerce on Razorpay</div>
+          <div className="brandname">Nexus</div>
+          <div className="brandsub">Make any merchant AI-buyable</div>
         </div>
 
         <div className="personas" role="tablist">
@@ -224,8 +224,8 @@ function Unlock({ onUnlocked }: { onUnlocked: () => void }) {
       <header className="topbar">
         <div className="row" style={{ gap: 10 }}>
           <div className="mark">K</div>
-          <div className="brandname">Kirana</div>
-          <div className="brandsub">Agentic commerce on Razorpay</div>
+          <div className="brandname">Nexus</div>
+          <div className="brandsub">Make any merchant AI-buyable</div>
         </div>
       </header>
       <div className="body skin-merchant">
@@ -244,7 +244,7 @@ function Unlock({ onUnlocked }: { onUnlocked: () => void }) {
                 <button className="btn" disabled={!value.trim()} onClick={() => { setToken(value); onUnlocked(); }}>Unlock</button>
               </div>
               <div className="tiny" style={{ marginTop: 16 }}>
-                Set <code className="mono">KIRANA_CONSOLE_TOKEN</code> in <code className="mono">.env</code> to keep the same token across restarts.
+                Set <code className="mono">NEXUS_CONSOLE_TOKEN</code> in <code className="mono">.env</code> to keep the same token across restarts.
               </div>
             </div>
           </div>

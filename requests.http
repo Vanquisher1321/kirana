@@ -1,4 +1,4 @@
-### Kirana — poke the API from inside VS Code (REST Client extension)
+### Nexus — poke the API from inside VS Code (REST Client extension)
 ### Click "Send Request" above any block below.
 
 @host = http://localhost:3000

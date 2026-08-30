@@ -5,14 +5,14 @@ import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 
-process.env.KIRANA_DB = `data/test-webhook-${process.pid}.db`;
-process.env.KIRANA_SIGNING_SECRET = 'd'.repeat(64);
-process.env.KIRANA_QUIET = '1';
-process.env.KIRANA_CONSOLE_TOKEN = 'test-console-token';
-process.env.KIRANA_ACCESS = 'locked';
+process.env.NEXUS_DB = `data/test-webhook-${process.pid}.db`;
+process.env.NEXUS_SIGNING_SECRET = 'd'.repeat(64);
+process.env.NEXUS_QUIET = '1';
+process.env.NEXUS_CONSOLE_TOKEN = 'test-console-token';
+process.env.NEXUS_ACCESS = 'locked';
 process.env.RAZORPAY_KEY_ID = 'rzp_test_fake123456';
 process.env.RAZORPAY_KEY_SECRET = 'fakesecret';
-process.env.RAZORPAY_WEBHOOK_SECRET = 'whsec_test_kirana';
+process.env.RAZORPAY_WEBHOOK_SECRET = 'whsec_test_nexus';
 
 const { buildApp } = await import('./app.ts');
 const { ingestStorefront } = await import('./catalog/ingest.ts');
@@ -22,7 +22,7 @@ const { grantConsent } = await import('./checkout/consent.ts');
 const { checkout, getOrder } = await import('./checkout/checkout.ts');
 const { list: auditList, verify } = await import('./audit/ledger.ts');
 
-const SECRET = 'whsec_test_kirana';
+const SECRET = 'whsec_test_nexus';
 const FIXTURE = readFileSync(new URL('./adapters/__fixtures__/shopify-store.json', import.meta.url), 'utf8');
 const fixtureFetch = async (url: string | URL) => {
   const u = String(url);

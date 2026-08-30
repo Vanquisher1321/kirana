@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Kirana: run server",
+      "name": "Nexus: run server",
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/server/src/index.ts",
@@ -17,7 +17,7 @@
       "skipFiles": ["<node_internals>/**"]
     },
     {
-      "name": "Kirana: run server (watch)",
+      "name": "Nexus: run server (watch)",
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/server/src/index.ts",
@@ -33,7 +33,7 @@
       "skipFiles": ["<node_internals>/**"]
     },
     {
-      "name": "Kirana: all tests",
+      "name": "Nexus: all tests",
       "type": "node",
       "request": "launch",
       "cwd": "${workspaceFolder}/server",
@@ -47,7 +47,7 @@
       "skipFiles": ["<node_internals>/**"]
     },
     {
-      "name": "Kirana: test THIS file",
+      "name": "Nexus: test THIS file",
       "type": "node",
       "request": "launch",
       "cwd": "${workspaceFolder}/server",
@@ -62,7 +62,7 @@
       "skipFiles": ["<node_internals>/**"]
     },
     {
-      "name": "Kirana: seed demo store",
+      "name": "Nexus: seed demo store",
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/server/src/cli/seed.ts",
@@ -79,8 +79,8 @@
   ],
   "compounds": [
     {
-      "name": "Kirana: server + tunnel",
-      "configurations": ["Kirana: run server"],
+      "name": "Nexus: server + tunnel",
+      "configurations": ["Nexus: run server"],
       "preLaunchTask": "zrok: share public 3000",
       "stopAll": true
     }

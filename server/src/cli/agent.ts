@@ -33,7 +33,7 @@ async function rpc<T = Record<string, unknown>>(method: string, params?: unknown
     headers: {
       'content-type': 'application/json',
       accept: 'application/json, text/event-stream',
-      'x-kirana-agent': agentId,
+      'x-nexus-agent': agentId,
     },
     body: JSON.stringify(body),
   });
@@ -58,7 +58,7 @@ console.log(`\x1b[2mbuyer agent "${agentId}" -> ${url}\x1b[0m`);
 
 step('1', 'Introducing myself to the shop');
 const init = await rpc<{ serverInfo?: { name?: string } }>('initialize', {
-  protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'kirana-cli-buyer', version: '0.1' },
+  protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'nexus-cli-buyer', version: '0.1' },
 });
 say(`connected to ${init.serverInfo?.name}`);
 

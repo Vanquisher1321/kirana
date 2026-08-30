@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 
-process.env.KIRANA_DB = `data/test-app-${process.pid}.db`;
-process.env.KIRANA_SIGNING_SECRET = 'b'.repeat(64);
-process.env.KIRANA_QUIET = '1';
-process.env.KIRANA_CONSOLE_TOKEN = 'test-console-token';
-process.env.KIRANA_ACCESS = 'locked';
+process.env.NEXUS_DB = `data/test-app-${process.pid}.db`;
+process.env.NEXUS_SIGNING_SECRET = 'b'.repeat(64);
+process.env.NEXUS_QUIET = '1';
+process.env.NEXUS_CONSOLE_TOKEN = 'test-console-token';
+process.env.NEXUS_ACCESS = 'locked';
 
 const { buildApp } = await import('./app.ts');
 const { ingestStorefront } = await import('./catalog/ingest.ts');
@@ -69,10 +69,10 @@ test('health endpoint reports service state', async () => {
 
 test('MCP initialize handshake succeeds', async () => {
   const r = await rpc('initialize', {
-    protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'kirana-test', version: '0' },
+    protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'nexus-test', version: '0' },
   });
   const result = r.result as { serverInfo?: { name?: string }; instructions?: string };
-  assert.equal(result.serverInfo?.name, 'kirana-bluehill-example');
+  assert.equal(result.serverInfo?.name, 'nexus-bluehill-example');
   assert.match(result.instructions ?? '', /cryptographically signed/);
 });
 
@@ -263,7 +263,7 @@ test('SECURITY: the buyer-agent endpoint stays open, because discovery cannot ne
 test('SECURITY: an unrecognised agent key is rejected rather than downgraded', async () => {
   const res = await fetch(`${base}/mcp/bluehill-example`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-kirana-agent-key': 'kag_totally_made_up' },
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-nexus-agent-key': 'kag_totally_made_up' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
   });
   assert.equal(res.status, 401);
@@ -272,7 +272,7 @@ test('SECURITY: an unrecognised agent key is rejected rather than downgraded', a
 test('SECURITY: a self-asserted agent name cannot have its spending caps raised', async () => {
   await fetch(`${base}/mcp/bluehill-example`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-kirana-agent': 'impostor' },
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-nexus-agent': 'impostor' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_merchant_info', arguments: {} } }),
   });
   const res = await authFetch(`${base}/api/agents/impostor/caps`, {
@@ -299,7 +299,7 @@ test('SECURITY: an issued key produces a verified agent whose caps CAN be raised
 });
 
 test('LOCKED MODE: reading is open but acting still needs the token', async () => {
-  // This test process sets PUBLIC_ORIGIN implicitly off but KIRANA_ACCESS is
+  // This test process sets PUBLIC_ORIGIN implicitly off but NEXUS_ACCESS is
   // unset, so it runs LOCKED (a token is present in these tests). The split the
   // hook makes: GET is the read surface, and every endpoint that spends,
   // approves, ingests or pauses is a POST.

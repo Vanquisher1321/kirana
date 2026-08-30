@@ -1,12 +1,12 @@
 # Security posture
 
-Kirana lets a program spend a person's money. This document states what it
+Nexus lets a program spend a person's money. This document states what it
 defends against, how, and — just as importantly — what it does not defend
 against yet.
 
 ## Two modes, and which one you are reading about
 
-`KIRANA_ACCESS` selects between them, defaulting to `demo` on plain localhost
+`NEXUS_ACCESS` selects between them, defaulting to `demo` on plain localhost
 and `locked` as soon as `PUBLIC_ORIGIN` is set — a console does not become
 internet-facing and open by accident.
 
@@ -31,7 +31,7 @@ button open. An ecosystem where any agent can shop any merchant cannot gate
 discovery behind a credential — but the button that says *"yes, spend my
 money"* absolutely must be gated.
 
-If `KIRANA_CONSOLE_TOKEN` is unset, a token is generated at boot and printed
+If `NEXUS_CONSOLE_TOKEN` is unset, a token is generated at boot and printed
 once. There is no "no authentication" mode.
 
 ## Threats and mitigations
@@ -56,11 +56,11 @@ answers must be public, because which one gets used is not ours to choose; only
 check entirely.
 
 ### Agent identity is proven, not asserted
-`x-kirana-agent` is a name in a header — any caller can send any value. Agents
+`x-nexus-agent` is a name in a header — any caller can send any value. Agents
 sending only a name are registered as **unverified**, pinned to the
 conservative default caps, and their caps **cannot be raised**; otherwise
 anyone could inherit a trusted identity by copying a header. A real key
-(`x-kirana-agent-key`) is required for a verified agent. Keys are stored as
+(`x-nexus-agent-key`) is required for a verified agent. Keys are stored as
 SHA-256 hashes and shown exactly once. An unrecognised key is **rejected**, not
 silently downgraded.
 

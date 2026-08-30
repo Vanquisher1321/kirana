@@ -1,5 +1,5 @@
 {
-  "name": "kirana",
+  "name": "nexus",
   "version": "0.1.0",
   "private": true,
   "description": "Make any merchant transactable by an AI buyer. Storefront -> agent-readable catalog -> MCP server -> gated agentic checkout on Razorpay.",
@@ -15,6 +15,7 @@
     "probe": "npm --prefix server run probe",
     "agent": "npm --prefix server run agent --",
     "test": "npm --prefix server test",
-    "build:deploy": "npm --prefix server install --omit=dev && npm --prefix web install && npm --prefix web run build"
+    "build:deploy": "npm --prefix server install --omit=dev && npm --prefix web install && npm --prefix web run build",
+    "reset": "npm --prefix server run reset"
   }
 }

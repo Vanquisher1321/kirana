@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-process.env.KIRANA_DB = `data/test-ledger-${process.pid}.db`;
+process.env.NEXUS_DB = `data/test-ledger-${process.pid}.db`;
 const { record, verify, list, forSubject } = await import('./ledger.ts');
 const { db } = await import('../lib/db.ts');
 

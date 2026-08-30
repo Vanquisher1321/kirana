@@ -1,5 +1,5 @@
 {
-  "name": "kirana-server",
+  "name": "nexus-server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "seed": "node --env-file-if-exists=.env --experimental-sqlite --experimental-strip-types src/cli/seed.ts",
     "probe": "node --env-file-if-exists=.env --experimental-sqlite --experimental-strip-types src/cli/probe.ts",
-    "agent": "node --env-file-if-exists=.env --experimental-strip-types src/cli/agent.ts"
+    "agent": "node --env-file-if-exists=.env --experimental-strip-types src/cli/agent.ts",
+    "reset": "node --env-file-if-exists=.env --experimental-sqlite --experimental-strip-types src/cli/reset.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

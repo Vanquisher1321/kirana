@@ -8,7 +8,7 @@
       "isBackground": true,
       "presentation": {
         "panel": "dedicated",
-        "group": "kirana",
+        "group": "nexus",
         "reveal": "always"
       },
       "problemMatcher": {
@@ -28,7 +28,7 @@
       }
     },
     {
-      "label": "kirana: test",
+      "label": "nexus: test",
       "type": "shell",
       "command": "npm test",
       "options": {
@@ -40,12 +40,12 @@
       },
       "presentation": {
         "panel": "dedicated",
-        "group": "kirana"
+        "group": "nexus"
       },
       "problemMatcher": []
     },
     {
-      "label": "kirana: typecheck",
+      "label": "nexus: typecheck",
       "type": "shell",
       "command": "npx tsc -p tsconfig.json",
       "options": {
@@ -57,7 +57,7 @@
       ]
     },
     {
-      "label": "kirana: seed demo store",
+      "label": "nexus: seed demo store",
       "type": "shell",
       "command": "npm run seed",
       "options": {
@@ -65,14 +65,14 @@
       },
       "presentation": {
         "panel": "dedicated",
-        "group": "kirana"
+        "group": "nexus"
       },
       "problemMatcher": []
     },
     {
-      "label": "kirana: reset database",
+      "label": "nexus: reset database",
       "type": "shell",
-      "command": "Remove-Item -Force -ErrorAction SilentlyContinue data/kirana.db*; npm run seed",
+      "command": "Remove-Item -Force -ErrorAction SilentlyContinue data/nexus.db*; npm run seed",
       "options": {
         "cwd": "${workspaceFolder}/server",
         "shell": {
@@ -85,17 +85,17 @@
       },
       "presentation": {
         "panel": "dedicated",
-        "group": "kirana"
+        "group": "nexus"
       },
       "problemMatcher": []
     },
     {
-      "label": "kirana: verify audit chain",
+      "label": "nexus: verify audit chain",
       "type": "shell",
       "command": "curl -s http://localhost:3000/api/audit/verify",
       "presentation": {
         "panel": "dedicated",
-        "group": "kirana"
+        "group": "nexus"
       },
       "problemMatcher": []
     },
@@ -109,7 +109,7 @@
       "isBackground": true,
       "presentation": {
         "panel": "dedicated",
-        "group": "kirana"
+        "group": "nexus"
       },
       "problemMatcher": []
     },
@@ -122,7 +122,7 @@
       },
       "presentation": {
         "panel": "dedicated",
-        "group": "kirana"
+        "group": "nexus"
       },
       "problemMatcher": []
     }
