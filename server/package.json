@@ -13,7 +13,8 @@
     "test": "node --experimental-sqlite --experimental-strip-types --test",
     "typecheck": "tsc -p tsconfig.json",
     "seed": "node --env-file-if-exists=.env --experimental-sqlite --experimental-strip-types src/cli/seed.ts",
-    "probe": "node --env-file-if-exists=.env --experimental-sqlite --experimental-strip-types src/cli/probe.ts"
+    "probe": "node --env-file-if-exists=.env --experimental-sqlite --experimental-strip-types src/cli/probe.ts",
+    "agent": "node --env-file-if-exists=.env --experimental-strip-types src/cli/agent.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
