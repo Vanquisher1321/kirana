@@ -1,7 +1,10 @@
 node_modules/
 dist/
-.env
-.env.local
+
+# Every .env variant, including backups and copies. A narrow `.env` rule let a
+# `.env.backup-before-rename` into a commit once; this is the fix.
+.env*
+!.env.example
 *.log
 server/data/*.db
 server/data/*.db-*
