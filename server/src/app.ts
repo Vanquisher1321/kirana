@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import fastifyStatic from '@fastify/static';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { config } from './lib/config.ts';
 import { ingestStorefront, IngestError } from './catalog/ingest.ts';
@@ -13,6 +14,9 @@ import { listAgents, setAgentCaps } from './checkout/agents.ts';
 import { KILL_SWITCH, engageKillSwitch, releaseKillSwitch } from './checkout/guard.ts';
 import { circuitState } from './razorpay/client.ts';
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 export function buildApp() {
     const app = Fastify({
@@ -270,6 +274,30 @@ export function buildApp() {
     reply.hijack();
     await transport.handleRequest(request.raw, reply.raw, request.body);
   });
+
+  // -------------------------------------------------------------------------
+  // The console. Served by the same process as the API so the whole demo is a
+  // single command and a single port -- one less thing to go wrong on camera.
+  // Run `npm run dev` in web/ instead while actually building the UI.
+  // -------------------------------------------------------------------------
+
+  const webDist = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist');
+  if (existsSync(join(webDist, 'index.html'))) {
+    void app.register(fastifyStatic, { root: webDist, prefix: '/' });
+    // The approval link handed to buyer agents, and any client-side route,
+    // resolve to the single-page app rather than a 404.
+    app.setNotFoundHandler((request, reply) => {
+      if (request.url.startsWith('/api') || request.url.startsWith('/mcp') || request.url.startsWith('/webhooks')) {
+        return reply.code(404).send({ error: 'not found' });
+      }
+      return reply.sendFile('index.html');
+    });
+  } else {
+    app.get('/', async () => ({
+      service: 'kirana',
+      note: 'Console not built yet. Run `npm run build:web` from the repo root, or `npm run dev` inside web/ for live reload on port 5173.',
+    }));
+  }
 
   return app;
 }

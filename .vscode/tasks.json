@@ -6,9 +6,20 @@
       "type": "shell",
       "command": "zrok share public 3000",
       "isBackground": true,
-      "presentation": { "panel": "dedicated", "group": "kirana", "reveal": "always" },
+      "presentation": {
+        "panel": "dedicated",
+        "group": "kirana",
+        "reveal": "always"
+      },
       "problemMatcher": {
-        "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+        "pattern": [
+          {
+            "regexp": ".",
+            "file": 1,
+            "location": 2,
+            "message": 3
+          }
+        ],
         "background": {
           "activeOnStart": true,
           "beginsPattern": ".*",
@@ -20,40 +31,99 @@
       "label": "kirana: test",
       "type": "shell",
       "command": "npm test",
-      "options": { "cwd": "${workspaceFolder}/server" },
-      "group": { "kind": "test", "isDefault": true },
-      "presentation": { "panel": "dedicated", "group": "kirana" },
+      "options": {
+        "cwd": "${workspaceFolder}/server"
+      },
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "group": "kirana"
+      },
       "problemMatcher": []
     },
     {
       "label": "kirana: typecheck",
       "type": "shell",
       "command": "npx tsc -p tsconfig.json",
-      "options": { "cwd": "${workspaceFolder}/server" },
+      "options": {
+        "cwd": "${workspaceFolder}/server"
+      },
       "group": "build",
-      "problemMatcher": ["$tsc"]
+      "problemMatcher": [
+        "$tsc"
+      ]
     },
     {
       "label": "kirana: seed demo store",
       "type": "shell",
       "command": "npm run seed",
-      "options": { "cwd": "${workspaceFolder}/server" },
-      "presentation": { "panel": "dedicated", "group": "kirana" },
+      "options": {
+        "cwd": "${workspaceFolder}/server"
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "group": "kirana"
+      },
       "problemMatcher": []
     },
     {
       "label": "kirana: reset database",
       "type": "shell",
       "command": "Remove-Item -Force -ErrorAction SilentlyContinue data/kirana.db*; npm run seed",
-      "options": { "cwd": "${workspaceFolder}/server", "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-Command"] } },
-      "presentation": { "panel": "dedicated", "group": "kirana" },
+      "options": {
+        "cwd": "${workspaceFolder}/server",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-Command"
+          ]
+        }
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "group": "kirana"
+      },
       "problemMatcher": []
     },
     {
       "label": "kirana: verify audit chain",
       "type": "shell",
       "command": "curl -s http://localhost:3000/api/audit/verify",
-      "presentation": { "panel": "dedicated", "group": "kirana" },
+      "presentation": {
+        "panel": "dedicated",
+        "group": "kirana"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "web: dev server (live reload)",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": {
+        "cwd": "${workspaceFolder}/web"
+      },
+      "isBackground": true,
+      "presentation": {
+        "panel": "dedicated",
+        "group": "kirana"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "web: build for demo",
+      "type": "shell",
+      "command": "npm run build",
+      "options": {
+        "cwd": "${workspaceFolder}/web"
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "group": "kirana"
+      },
       "problemMatcher": []
     }
   ]
