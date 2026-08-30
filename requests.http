@@ -71,3 +71,11 @@ Accept: application/json, text/event-stream
 { "jsonrpc": "2.0", "id": 5, "method": "tools/call",
   "params": { "name": "create_quote",
               "arguments": { "items": [{ "variant_id": "PASTE_VARIANT_ID", "quantity": 2 }] } } }
+
+### ─────────────────────────────────────────────────────────────
+### Reconcile now (settles paid orders without any webhook)
+### ─────────────────────────────────────────────────────────────
+POST {{host}}/api/reconcile
+Content-Type: application/json
+
+{}
