@@ -1,6 +1,7 @@
 import { buildApp } from './app.ts';
 import { config, describeConfig } from './lib/config.ts';
 import { listMerchants } from './catalog/store.ts';
+import { startReconciler } from './checkout/reconcile.ts';
 
 const app = buildApp();
 
@@ -12,6 +13,10 @@ try {
   const merchants = listMerchants();
   app.log.info(`merchants ingested  ${merchants.length}`);
   for (const m of merchants) app.log.info(`  ${m.name} -> ${base}/mcp/${m.slug}`);
+  if (config.razorpay.configured) {
+    startReconciler();
+    app.log.info('reconciler          sweeping unsettled orders every 20s (webhooks optional)');
+  }
   app.log.info('\u2014'.repeat(58));
 } catch (err) {
   app.log.error(err);

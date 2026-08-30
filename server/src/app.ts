@@ -9,6 +9,7 @@ import { formatInr } from './lib/money.ts';
 import { listPendingConsents, approveConsent, rejectConsent, revokeConsent, getConsent, ConsentError } from './checkout/consent.ts';
 import { getQuote } from './checkout/quote.ts';
 import { listOrders, getOrder, settleOrder } from './checkout/checkout.ts';
+import { reconcile } from './checkout/reconcile.ts';
 import { listAgents, setAgentCaps } from './checkout/agents.ts';
 import { KILL_SWITCH, engageKillSwitch, releaseKillSwitch } from './checkout/guard.ts';
 import { circuitState } from './razorpay/client.ts';
@@ -185,6 +186,9 @@ export function buildApp() {
     const updated = setAgentCaps(id, Number(b.perOrderMinor), Number(b.dailyMinor));
     return updated ?? reply.code(404).send({ error: 'not_found' });
   });
+
+  // Manual sweep, for the console button and for a demo with no tunnel.
+  app.post('/api/reconcile', async () => reconcile({ minAgeMs: 0 }));
 
   app.get('/api/system', async () => ({
     killSwitch: { engaged: KILL_SWITCH.engaged, reason: KILL_SWITCH.reason },

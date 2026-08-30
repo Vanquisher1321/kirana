@@ -176,3 +176,7 @@ export function createPaymentLink(input: {
 export function fetchPayment(paymentId: string, opts: CallOptions = {}): Promise<RzpPayment> {
   return call<RzpPayment>(`/payments/${paymentId}`, opts);
 }
+
+export function fetchOrderPayments(orderId: string, opts: CallOptions = {}): Promise<{ count: number; items: RzpPayment[] }> {
+  return call<{ count: number; items: RzpPayment[] }>(`/orders/${orderId}/payments`, opts);
+}
