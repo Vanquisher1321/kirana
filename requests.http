@@ -1,0 +1,73 @@
+### Kirana — poke the API from inside VS Code (REST Client extension)
+### Click "Send Request" above any block below.
+
+@host = http://localhost:3000
+@merchant = bluehill-example
+
+### Is it alive
+GET {{host}}/health
+
+### Every ingested merchant, with its generated MCP endpoint
+GET {{host}}/api/merchants
+
+### Ingest a real storefront (Shopify stores work with no cooperation needed)
+POST {{host}}/api/ingest
+Content-Type: application/json
+
+{ "url": "bluetokaicoffee.com" }
+
+### Browse what an agent would see
+GET {{host}}/api/merchants/{{merchant}}/products?q=coffee
+
+### The audit trail, newest first
+GET {{host}}/api/audit?limit=25
+
+### Re-walk the hash chain and prove nothing was tampered with
+GET {{host}}/api/audit/verify
+
+
+### ─────────────────────────────────────────────────────────────
+### MCP — talk to the merchant exactly as a buyer agent would
+### ─────────────────────────────────────────────────────────────
+
+### 1. Handshake
+POST {{host}}/mcp/{{merchant}}
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{ "jsonrpc": "2.0", "id": 1, "method": "initialize",
+  "params": { "protocolVersion": "2025-06-18", "capabilities": {},
+              "clientInfo": { "name": "rest-client", "version": "0" } } }
+
+### 2. What tools does a buyer get
+POST {{host}}/mcp/{{merchant}}
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }
+
+### 3. Who am I shopping from (note: discloses whether a model read the catalog)
+POST {{host}}/mcp/{{merchant}}
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{ "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+  "params": { "name": "get_merchant_info", "arguments": {} } }
+
+### 4. Search within a budget
+POST {{host}}/mcp/{{merchant}}
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{ "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+  "params": { "name": "search_products",
+              "arguments": { "query": "coffee", "max_price_inr": 600, "in_stock_only": true } } }
+
+### 5. Get a signed quote — paste a variant_id from step 4
+POST {{host}}/mcp/{{merchant}}
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{ "jsonrpc": "2.0", "id": 5, "method": "tools/call",
+  "params": { "name": "create_quote",
+              "arguments": { "items": [{ "variant_id": "PASTE_VARIANT_ID", "quantity": 2 }] } } }

@@ -1,0 +1,88 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Kirana: run server",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/server/src/index.ts",
+      "cwd": "${workspaceFolder}/server",
+      "runtimeArgs": [
+        "--env-file-if-exists=.env",
+        "--experimental-sqlite",
+        "--experimental-strip-types",
+        "--no-warnings=ExperimentalWarning"
+      ],
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Kirana: run server (watch)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/server/src/index.ts",
+      "cwd": "${workspaceFolder}/server",
+      "runtimeArgs": [
+        "--env-file-if-exists=.env",
+        "--experimental-sqlite",
+        "--experimental-strip-types",
+        "--no-warnings=ExperimentalWarning",
+        "--watch"
+      ],
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Kirana: all tests",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/server",
+      "runtimeArgs": [
+        "--experimental-sqlite",
+        "--experimental-strip-types",
+        "--no-warnings=ExperimentalWarning",
+        "--test"
+      ],
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Kirana: test THIS file",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/server",
+      "program": "${file}",
+      "runtimeArgs": [
+        "--experimental-sqlite",
+        "--experimental-strip-types",
+        "--no-warnings=ExperimentalWarning",
+        "--test"
+      ],
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Kirana: seed demo store",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/server/src/cli/seed.ts",
+      "cwd": "${workspaceFolder}/server",
+      "runtimeArgs": [
+        "--env-file-if-exists=.env",
+        "--experimental-sqlite",
+        "--experimental-strip-types",
+        "--no-warnings=ExperimentalWarning"
+      ],
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Kirana: server + tunnel",
+      "configurations": ["Kirana: run server"],
+      "preLaunchTask": "zrok: share public 3000",
+      "stopAll": true
+    }
+  ]
+}

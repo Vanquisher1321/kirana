@@ -1,0 +1,60 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "zrok: share public 3000",
+      "type": "shell",
+      "command": "zrok share public 3000",
+      "isBackground": true,
+      "presentation": { "panel": "dedicated", "group": "kirana", "reveal": "always" },
+      "problemMatcher": {
+        "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": ".*(share.zrok.io|https://).*"
+        }
+      }
+    },
+    {
+      "label": "kirana: test",
+      "type": "shell",
+      "command": "npm test",
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "group": { "kind": "test", "isDefault": true },
+      "presentation": { "panel": "dedicated", "group": "kirana" },
+      "problemMatcher": []
+    },
+    {
+      "label": "kirana: typecheck",
+      "type": "shell",
+      "command": "npx tsc -p tsconfig.json",
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "group": "build",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "kirana: seed demo store",
+      "type": "shell",
+      "command": "npm run seed",
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "presentation": { "panel": "dedicated", "group": "kirana" },
+      "problemMatcher": []
+    },
+    {
+      "label": "kirana: reset database",
+      "type": "shell",
+      "command": "Remove-Item -Force -ErrorAction SilentlyContinue data/kirana.db*; npm run seed",
+      "options": { "cwd": "${workspaceFolder}/server", "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-Command"] } },
+      "presentation": { "panel": "dedicated", "group": "kirana" },
+      "problemMatcher": []
+    },
+    {
+      "label": "kirana: verify audit chain",
+      "type": "shell",
+      "command": "curl -s http://localhost:3000/api/audit/verify",
+      "presentation": { "panel": "dedicated", "group": "kirana" },
+      "problemMatcher": []
+    }
+  ]
+}
