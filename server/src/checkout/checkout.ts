@@ -207,12 +207,38 @@ export function listOrders(limit = 50): Record<string, unknown>[] {
 export function settleOrder(input: {
   razorpayOrderId?: string; referenceId?: string; paymentId: string; status: 'paid' | 'failed'; failureReason?: string;
 }): string | null {
-  const row = input.razorpayOrderId
-    ? db.prepare('SELECT id FROM orders WHERE razorpay_order_id = ?').get(input.razorpayOrderId) as Record<string, unknown> | undefined
-    : db.prepare("SELECT id FROM orders WHERE 'kir' || substr(id, 5) = ?").get(input.referenceId ?? '') as Record<string, unknown> | undefined;
-  if (!row) return null;
+  // Match on the Razorpay order id when present, otherwise fall back to the
+  // receipt/reference we generated -- payment-link events do not always carry
+  // an order id.
+  let row = input.razorpayOrderId
+    ? db.prepare('SELECT id, status, razorpay_payment_id FROM orders WHERE razorpay_order_id = ?').get(input.razorpayOrderId) as Record<string, unknown> | undefined
+    : undefined;
+  if (!row && input.referenceId) {
+    row = db.prepare("SELECT id, status, razorpay_payment_id FROM orders WHERE 'kir' || substr(id, 5) = ?").get(input.referenceId) as Record<string, unknown> | undefined;
+  }
+  if (!row) {
+    record({
+      actor: 'razorpay:webhook', action: 'webhook.unmatched', subjectId: null, outcome: 'blocked',
+      detail: { razorpayOrderId: input.razorpayOrderId ?? null, referenceId: input.referenceId ?? null, paymentId: input.paymentId },
+    });
+    return null;
+  }
 
   const orderId = String(row.id);
+
+  // Razorpay retries a webhook until it gets a 2xx, so the same event arrives
+  // more than once as a matter of course. Re-applying an identical settlement
+  // must be a no-op: otherwise the audit trail grows a second "money received"
+  // entry for one payment, which is exactly the kind of discrepancy the trail
+  // exists to rule out.
+  if (String(row.status) === input.status && String(row.razorpay_payment_id ?? '') === input.paymentId) {
+    record({
+      actor: 'razorpay:webhook', action: 'webhook.duplicate', subjectId: orderId, outcome: 'ok',
+      detail: { paymentId: input.paymentId, status: input.status, note: 'Already settled; ignored.' },
+    });
+    return orderId;
+  }
+
   db.prepare('UPDATE orders SET status = ?, razorpay_payment_id = ?, failure_reason = ?, updated_at = ? WHERE id = ?')
     .run(input.status, input.paymentId, input.failureReason ?? null, nowIso(), orderId);
 

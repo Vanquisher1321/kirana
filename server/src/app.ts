@@ -25,6 +25,21 @@ export function buildApp() {
       bodyLimit: 2 * 1024 * 1024,
     });
 
+  // Razorpay signs the EXACT bytes it sends. Verifying against a re-serialised
+  // body (JSON.stringify(request.body)) compares our formatting to their
+  // formatting and fails on key order, spacing or unicode escaping -- so every
+  // genuine webhook would be rejected as a forgery. The raw string is kept.
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+    (req as unknown as { rawBody: string }).rawBody = body as string;
+    if (!body || (body as string).length === 0) return done(null, {});
+    try {
+      done(null, JSON.parse(body as string));
+    } catch (err) {
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      done(err as Error, undefined);
+    }
+  });
+
   app.get('/health', async () => ({ ok: true, service: 'kirana', razorpay: config.razorpay.configured }));
 
   // ---------------------------------------------------------------------------
@@ -193,85 +208,63 @@ export function buildApp() {
   // Razorpay webhook. Signature is verified before the body is trusted.
   // -------------------------------------------------------------------------
 
-  app.post('/webhooks/razorpay', { config: { rawBody: true } }, async (request, reply) => {
+  app.post('/webhooks/razorpay', async (request, reply) => {
     const secret = config.razorpay.webhookSecret;
     const signature = String(request.headers['x-razorpay-signature'] ?? '');
-    const raw = JSON.stringify(request.body);
+    const raw = (request as unknown as { rawBody?: string }).rawBody ?? '';
 
     if (secret) {
       const expected = createHmac('sha256', secret).update(raw).digest('hex');
       const a = Buffer.from(expected, 'hex');
       const b = Buffer.from(signature, 'hex');
-      const valid = a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
+      const valid = a.length > 0 && a.length === b.length && timingSafeEqual(a, b);
       if (!valid) {
-        record({ actor: 'razorpay:webhook', action: 'webhook.rejected', subjectId: null, outcome: 'blocked', detail: { reason: 'bad signature' } });
+        record({
+          actor: 'razorpay:webhook', action: 'webhook.rejected', subjectId: null, outcome: 'blocked',
+          detail: { reason: 'signature did not match', signaturePresent: signature.length > 0, bodyBytes: raw.length },
+        });
         return reply.code(400).send({ error: 'invalid signature' });
       }
+    } else {
+      // Refusing outright would make local development impossible, but running
+      // unverified must never be silent.
+      record({
+        actor: 'razorpay:webhook', action: 'webhook.unverified', subjectId: null, outcome: 'blocked',
+        detail: { reason: 'RAZORPAY_WEBHOOK_SECRET is not set; anyone who can reach this URL can post here' },
+      });
     }
 
-    const body = request.body as { event?: string; payload?: Record<string, { entity?: Record<string, unknown> }> };
+    const body = request.body as {
+      event?: string;
+      payload?: { payment?: { entity?: Record<string, unknown> }; payment_link?: { entity?: Record<string, unknown> } };
+    };
     const event = body.event ?? 'unknown';
-    const payment = body.payload?.payment?.entity as Record<string, unknown> | undefined;
-    const link = body.payload?.payment_link?.entity as Record<string, unknown> | undefined;
+    const payment = body.payload?.payment?.entity;
+    const link = body.payload?.payment_link?.entity;
 
-    if (event === 'payment.captured' && payment) {
+    if ((event === 'payment.captured' || event === 'payment_link.paid') && payment) {
       settleOrder({
         razorpayOrderId: (payment.order_id as string) ?? undefined,
         referenceId: (link?.reference_id as string) ?? undefined,
-        paymentId: String(payment.id), status: 'paid',
+        paymentId: String(payment.id),
+        status: 'paid',
       });
     } else if (event === 'payment.failed' && payment) {
       settleOrder({
         razorpayOrderId: (payment.order_id as string) ?? undefined,
-        paymentId: String(payment.id), status: 'failed',
+        referenceId: (link?.reference_id as string) ?? undefined,
+        paymentId: String(payment.id),
+        status: 'failed',
         failureReason: `${String(payment.error_code ?? 'failed')}: ${String(payment.error_description ?? '')}`,
       });
     } else {
       record({ actor: 'razorpay:webhook', action: 'webhook.ignored', subjectId: null, outcome: 'ok', detail: { event } });
     }
 
-    return { ok: true };
-  });
-
-  // ---------------------------------------------------------------------------
-  // MCP endpoint, one per merchant.
-  //
-  // Stateless: a fresh server + transport per request. There is no session state
-  // worth keeping between calls, and statelessness means a dropped tunnel or a
-  // restarted process never strands a buyer agent mid-conversation.
-  // ---------------------------------------------------------------------------
-
-  app.all('/mcp/:slug', async (request, reply) => {
-    const { slug } = request.params as { slug: string };
-    const merchant = getMerchant(slug);
-    if (!merchant) {
-      return reply.code(404).send({
-        jsonrpc: '2.0',
-        error: { code: -32001, message: `No merchant "${slug}" has been ingested on this server.` },
-        id: null,
-      });
-    }
-
-    if (request.method === 'GET' || request.method === 'DELETE') {
-      return reply.code(405).header('allow', 'POST').send({
-        jsonrpc: '2.0',
-        error: { code: -32000, message: 'This MCP endpoint is stateless; use POST.' },
-        id: null,
-      });
-    }
-
-    const agentId = (request.headers['x-kirana-agent'] as string | undefined) ?? null;
-    const server = buildMcpServer(merchant, agentId);
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-
-    reply.raw.on('close', () => {
-      void transport.close();
-      void server.close();
-    });
-
-    await server.connect(transport);
-    reply.hijack();
-    await transport.handleRequest(request.raw, reply.raw, request.body);
+    // Always 200 on a verified webhook, even for events we ignore: a non-2xx
+    // makes Razorpay retry, and retrying something we deliberately skipped is
+    // noise, not safety.
+    return { ok: true, event };
   });
 
   // -------------------------------------------------------------------------
