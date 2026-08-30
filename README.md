@@ -158,9 +158,11 @@ One system, three people, on a persona switcher.
 Money is an integer number of paise everywhere. `parseFloat("499.10") * 100`
 returns `49909.999999999993`, and there is a test asserting we never do that.
 
-See **[ARCHITECTURE.md](ARCHITECTURE.md)** for the design, and
+See **[ARCHITECTURE.md](ARCHITECTURE.md)** for the design and its trade-offs,
 **[SECURITY.md](SECURITY.md)** for the threat model — including a plainly stated
-list of what it does *not* defend against.
+list of what it does *not* defend against — and **[FAILURES.md](FAILURES.md)**
+for what broke along the way, including the bug that would have told a paying
+customer they had not paid.
 
 ---
 
