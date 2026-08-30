@@ -1,0 +1,43 @@
+{
+  "products": [
+    {
+      "id": 8801122334455,
+      "title": "Attikan Estate — Medium Roast",
+      "handle": "attikan-estate-medium-roast",
+      "body_html": "<p>Notes of <strong>dark chocolate</strong> &amp; orange peel.</p><script>evil()</script><p>Grown at 1,400m in Chikmagalur.</p>",
+      "vendor": "Blue Hill Coffee",
+      "product_type": "Coffee Beans",
+      "tags": ["single-origin", "medium-roast", "arabica"],
+      "options": [{ "name": "Weight" }, { "name": "Grind" }],
+      "images": [{ "src": "https://cdn.example.com/attikan.jpg" }],
+      "variants": [
+        { "id": 111, "title": "250g / Whole Bean", "sku": "ATT-250-WB", "price": "499.00", "compare_at_price": "599.00", "available": true, "grams": 250, "option1": "250g", "option2": "Whole Bean" },
+        { "id": 112, "title": "500g / Whole Bean", "sku": "ATT-500-WB", "price": "1,899.10", "available": true, "grams": 500, "option1": "500g", "option2": "Whole Bean" },
+        { "id": 113, "title": "1kg / Whole Bean", "sku": "ATT-1K-WB", "price": "3499", "available": false, "grams": 1000, "option1": "1kg", "option2": "Whole Bean" }
+      ]
+    },
+    {
+      "id": 8801122334456,
+      "title": "Cold Brew Concentrate",
+      "handle": "cold-brew-concentrate",
+      "body_html": "Ready in 10 seconds.",
+      "vendor": "Blue Hill Coffee",
+      "product_type": "Ready to Drink",
+      "tags": "cold-brew, ready-to-drink,  bestseller ",
+      "options": [{ "name": "Size" }],
+      "images": [],
+      "variants": [
+        { "id": 221, "title": "200ml", "price": "349.50", "grams": 200, "option1": "200ml" },
+        { "id": 222, "title": "1L", "price": "not-a-price", "available": true, "option1": "1L" }
+      ]
+    },
+    {
+      "id": 8801122334457,
+      "title": "Gift Card (no variants)",
+      "handle": "gift-card",
+      "body_html": "",
+      "tags": null,
+      "variants": []
+    }
+  ]
+}
