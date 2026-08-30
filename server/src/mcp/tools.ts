@@ -18,6 +18,8 @@ import type { Product } from '../types.ts';
 export interface ToolContext {
   merchantId: string;
   agentId: string | null;
+  /** True only when the caller presented a matching agent key. */
+  identityProven: boolean;
 }
 
 function shapeVariant(v: Product['variants'][number]) {
@@ -267,6 +269,7 @@ export async function toolCheckout(ctx: ToolContext, args: { quote_id: string; c
     consentId: args.consent_id,
     merchantId: ctx.merchantId,
     agentId: ctx.agentId,
+    identityProven: ctx.identityProven,
     idempotencyKey: key,
   });
 

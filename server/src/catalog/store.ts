@@ -137,13 +137,13 @@ export function searchCatalog(merchantId: string, opts: SearchOpts = {}): Produc
   // silently returns the wrong rows rather than erroring, which is exactly the
   // kind of bug that reaches a buyer agent as a wrong price.
   const joinConds: string[] = [];
-  const joinParams: unknown[] = [];
+  const joinParams: Array<string | number> = [];
   if (opts.maxPriceMinor != null) { joinConds.push('v.price_minor <= ?'); joinParams.push(opts.maxPriceMinor); }
   if (opts.minPriceMinor != null) { joinConds.push('v.price_minor >= ?'); joinParams.push(opts.minPriceMinor); }
   if (opts.inStockOnly) { joinConds.push('v.available = 1'); }
 
   const whereConds = ['p.merchant_id = ?'];
-  const whereParams: unknown[] = [merchantId];
+  const whereParams: Array<string | number> = [merchantId];
   if (opts.query?.trim()) {
     const terms = opts.query.trim().toLowerCase().split(/\s+/).slice(0, 8);
     for (const t of terms) {
@@ -157,7 +157,7 @@ export function searchCatalog(merchantId: string, opts: SearchOpts = {}): Produc
   if (joinConds.length) sql += ` JOIN variants v ON v.product_id = p.id AND ${joinConds.join(' AND ')}`;
   sql += ` WHERE ${whereConds.join(' AND ')} LIMIT ?`;
 
-  const params = [...joinParams, ...whereParams, limit];
+  const params = [...joinParams, ...whereParams, limit] as Array<string | number>;
   const rows = db.prepare(sql).all(...params) as Record<string, unknown>[];
   const vmap = variantsFor(rows.map((r) => String(r.id)));
   return rows.map((r) => rowToProduct(r, vmap.get(String(r.id)) ?? []));

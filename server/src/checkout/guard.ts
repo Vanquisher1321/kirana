@@ -48,20 +48,49 @@ export interface GuardResult {
   consent?: Consent;
 }
 
+/**
+ * Caps for the presenting agent.
+ *
+ * `verified = 1` is load-bearing here, not decoration. Identity arrives either
+ * as a key the caller proved possession of, or as a free-text header anyone can
+ * copy. If a raised ceiling were granted on the strength of the header alone,
+ * an attacker who learned a trusted agent's name would inherit its limits by
+ * typing it — which would make every cap in this file advisory.
+ *
+ * So an unverified row is treated exactly like an unknown one.
+ */
 function agentCaps(agentId: string | null): { perOrder: number; daily: number; label: string } {
-  if (!agentId) return { perOrder: ANON_PER_ORDER_CAP_MINOR, daily: ANON_DAILY_CAP_MINOR, label: 'unregistered agent' };
+  const anon = { perOrder: ANON_PER_ORDER_CAP_MINOR, daily: ANON_DAILY_CAP_MINOR, label: 'unregistered agent' };
+  if (!agentId) return anon;
   const r = db.prepare('SELECT * FROM agents WHERE id = ? AND active = 1').get(agentId) as Record<string, unknown> | undefined;
-  if (!r) return { perOrder: ANON_PER_ORDER_CAP_MINOR, daily: ANON_DAILY_CAP_MINOR, label: 'unknown agent' };
+  if (!r) return { ...anon, label: 'unknown agent' };
+  if (Number(r.verified ?? 0) !== 1) {
+    return { ...anon, label: `${String(r.label)} (identity not proven)` };
+  }
   return { perOrder: Number(r.per_order_cap_minor), daily: Number(r.daily_cap_minor), label: String(r.label) };
 }
 
-function spentTodayMinor(agentId: string | null): number {
+/**
+ * Rolling 24-hour spend.
+ *
+ * A verified agent is counted against its own identity. Everyone else is
+ * counted against a SHARED anonymous pool -- because an unverified id can be
+ * rotated at will, and per-id accounting for a rotatable id is no accounting.
+ */
+function spentTodayMinor(agentId: string | null, verified: boolean): number {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  if (verified && agentId) {
+    const r = db.prepare(
+      `SELECT COALESCE(SUM(amount_minor), 0) AS total FROM orders
+       WHERE created_at >= ? AND status IN ('paid','awaiting_payment') AND agent_id = ?`,
+    ).get(since, agentId) as { total?: number } | undefined;
+    return Number(r?.total ?? 0);
+  }
   const r = db.prepare(
-    `SELECT COALESCE(SUM(amount_minor), 0) AS total FROM orders
-     WHERE created_at >= ? AND status IN ('paid','awaiting_payment')
-       AND (agent_id IS ? OR agent_id = ?)`,
-  ).get(since, agentId, agentId) as { total?: number } | undefined;
+    `SELECT COALESCE(SUM(amount_minor), 0) AS total FROM orders o
+     WHERE o.created_at >= ? AND o.status IN ('paid','awaiting_payment')
+       AND (o.agent_id IS NULL OR o.agent_id IN (SELECT id FROM agents WHERE verified = 0))`,
+  ).get(since) as { total?: number } | undefined;
   return Number(r?.total ?? 0);
 }
 
@@ -69,6 +98,15 @@ export interface GuardInput {
   quoteId: string;
   consentId: string;
   agentId: string | null;
+  /**
+   * Did THIS CALLER prove the identity it claims, with a key?
+   *
+   * This must be supplied by the layer that checked the key. Looking the id up
+   * in the agents table answers a different question -- "is there a verified
+   * agent by this name" -- which is exactly the question an impostor wants
+   * asked, because they can supply the name.
+   */
+  identityProven: boolean;
   merchantId: string;
   idempotencyKey: string;
 }
@@ -145,9 +183,21 @@ export function authorise(input: GuardInput): GuardResult {
     return fail('consent_quote_match', 'That approval was given for a different basket.');
   }
 
-  if (!add('consent_agent_match', 'Approval names the agent allowed to use it.', (c.agentId ?? null) === (input.agentId ?? null),
-    `Approved for ${c.agentId ?? 'unregistered agent'}`)) {
-    return fail('consent_agent_match', 'A different agent tried to use this approval.');
+  const namesMatch = (c.agentId ?? null) === (input.agentId ?? null);
+  const consentAgentVerified = c.agentId
+    ? Number((db.prepare('SELECT verified FROM agents WHERE id = ?').get(c.agentId) as { verified?: number } | undefined)?.verified ?? 0) === 1
+    : false;
+  // If the approval was granted to a verified agent, the caller must be that
+  // agent by KEY. Matching the name alone would let anyone who learns the
+  // consent id spend an approval that was never meant for them.
+  const identityOk = namesMatch && (!consentAgentVerified || input.identityProven);
+  if (!add('consent_agent_match', 'Approval names the agent allowed to use it, and it must prove that identity.', identityOk,
+    namesMatch && !identityOk
+      ? `Approved for ${c.agentId}, which must present its key`
+      : `Approved for ${c.agentId ?? 'unregistered agent'}`)) {
+    return fail('consent_agent_match', namesMatch
+      ? 'This approval belongs to a verified agent, which must prove its identity with a key.'
+      : 'A different agent tried to use this approval.');
   }
 
   // 6. THE cap check. The agent cannot spend more than the human allowed.
@@ -158,14 +208,14 @@ export function authorise(input: GuardInput): GuardResult {
   }
 
   // 7. Platform caps, independent of what any human approved.
-  const caps = agentCaps(input.agentId);
+  const caps = agentCaps(input.identityProven ? input.agentId : null);
   if (!add('within_per_order_cap', 'Every agent has a hard per-order ceiling.', quote.totalMinor <= caps.perOrder,
     `${formatInr(quote.totalMinor)} against ${formatInr(caps.perOrder)} for ${caps.label}`)) {
     return fail('within_per_order_cap',
       `${formatInr(quote.totalMinor)} exceeds the per-order ceiling of ${formatInr(caps.perOrder)} for this agent.`);
   }
 
-  const spent = spentTodayMinor(input.agentId);
+  const spent = spentTodayMinor(input.agentId, input.identityProven);
   if (!add('within_daily_cap', 'Every agent has a rolling 24-hour spend ceiling.', spent + quote.totalMinor <= caps.daily,
     `${formatInr(spent)} spent in 24h, ${formatInr(quote.totalMinor)} requested, ceiling ${formatInr(caps.daily)}`)) {
     return fail('within_daily_cap',

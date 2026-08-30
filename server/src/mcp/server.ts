@@ -20,8 +20,8 @@ function ok(payload: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }] };
 }
 
-export function buildMcpServer(merchant: Merchant, agentId: string | null): McpServer {
-  const ctx: ToolContext = { merchantId: merchant.id, agentId };
+export function buildMcpServer(merchant: Merchant, agentId: string | null, identityProven = false): McpServer {
+  const ctx: ToolContext = { merchantId: merchant.id, agentId, identityProven };
 
   const server = new McpServer(
     { name: `kirana-${merchant.slug}`, version: '0.1.0' },

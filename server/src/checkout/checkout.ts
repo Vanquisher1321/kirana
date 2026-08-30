@@ -15,6 +15,8 @@ export interface CheckoutInput {
   consentId: string;
   merchantId: string;
   agentId: string | null;
+  /** True only when the caller presented a matching agent key. */
+  identityProven?: boolean;
   idempotencyKey: string;
   buyerNote?: string;
   rzpOptions?: CallOptions;
@@ -57,6 +59,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutOutcome> {
     quoteId: input.quoteId,
     consentId: input.consentId,
     agentId: input.agentId,
+    identityProven: input.identityProven === true,
     merchantId: input.merchantId,
     idempotencyKey: input.idempotencyKey,
   });

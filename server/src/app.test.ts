@@ -327,3 +327,65 @@ test('LOCKED MODE: reading is open but acting still needs the token', async () =
     assert.equal(res.status, 401, `${path} refuses an unauthenticated write`);
   }
 });
+
+test('SECURITY: the auth hook cannot be bypassed by encoding or normalising the path', async () => {
+  // request.url is raw; Fastify's router decodes and normalises before
+  // matching. All three of these reached the handler while the hook tested a
+  // raw string prefix. Authorisation now keys on the matched route pattern.
+  const bypasses = [
+    '/%61pi/system/kill-switch',
+    '/API/system/kill-switch',
+    '//api/system/kill-switch',
+    '/%2Fapi/system/kill-switch',
+    '/api/./system/kill-switch',
+  ];
+  for (const path of bypasses) {
+    const res = await fetch(`${base}${path}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"engage":true}',
+    });
+    assert.ok(res.status === 401 || res.status === 404,
+      `${path} must not reach the handler unauthenticated (got ${res.status})`);
+  }
+  // And the system is still running, i.e. none of them engaged the kill switch.
+  const sys = await (await authFetch(`${base}/api/system`)).json() as { killSwitch: { engaged: boolean } };
+  assert.equal(sys.killSwitch.engaged, false, 'no bypass managed to pause spending');
+});
+
+test('SECURITY: a self-asserted agent name cannot inherit a verified agent’s raised caps', async () => {
+  const { issueAgentKey, setAgentCaps } = await import('./checkout/agents.ts');
+  const { authorise } = await import('./checkout/guard.ts');
+  const { createQuote } = await import('./checkout/quote.ts');
+  const { grantConsent } = await import('./checkout/consent.ts');
+
+  // An operator trusts one agent with a much larger ceiling.
+  issueAgentKey('trusted-partner', 'Trusted partner');
+  setAgentCaps('trusted-partner', 5_000_00, 50_000_00);
+
+  const merchant = getMerchant('bluehill-example')!;
+  const attikan = searchCatalog(merchant.id, { query: 'attikan' })[0]!;
+  const pricey = attikan.variants.find((v) => v.priceMinor === 189910)!;
+
+  // An impostor sends only the header — no key — and asks for a basket that
+  // only the raised ceiling would allow.
+  const q = createQuote(merchant.id, [{ variantId: pricey.id, quantity: 2 }], 'trusted-partner');
+  const c = grantConsent({ quoteId: q.id, agentId: 'trusted-partner', capMinor: 5_000_00, scope: merchant.id, grantedBy: 'om' });
+
+  // The impostor sends the NAME but proves nothing.
+  const decision = authorise({
+    quoteId: q.id, consentId: c.id, agentId: 'trusted-partner', identityProven: false,
+    merchantId: merchant.id, idempotencyKey: `impostor-${Date.now()}`,
+  });
+
+  assert.equal(decision.allowed, false, 'a header alone must not unlock a verified agent’s ceiling');
+  assert.ok(
+    decision.blockedBy === 'consent_agent_match' || decision.blockedBy === 'within_per_order_cap',
+    `expected an identity or cap refusal, got ${decision.blockedBy}`,
+  );
+
+  // And the same request, from a caller that DID prove the identity, is allowed.
+  const allowed = authorise({
+    quoteId: q.id, consentId: c.id, agentId: 'trusted-partner', identityProven: true,
+    merchantId: merchant.id, idempotencyKey: `genuine-${Date.now()}`,
+  });
+  assert.equal(allowed.allowed, true, `a proven identity should pass: ${allowed.reason}`);
+});

@@ -38,7 +38,7 @@ if (!invokedDirectly) {
 } else {
 await (async () => {
 const report = await seedDemoStore();
-console.log(`Seeded ${report.merchant ?? ''}`.trim());
+console.log('Seeded the demo shop.');
 console.log(`  merchant     ${report.merchantId}`);
 console.log(`  adapter      ${report.adapter} (llm: ${report.usedLlm})`);
 console.log(`  products     ${report.productCount}`);

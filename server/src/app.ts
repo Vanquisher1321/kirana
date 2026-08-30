@@ -56,9 +56,17 @@ export function buildApp() {
    * agent and leave the approve button open.
    */
   app.addHook('onRequest', async (request, reply) => {
-    const url = request.url;
+    // Authorise on the MATCHED ROUTE, never on the raw URL.
+    //
+    // request.url is the raw, undecoded target. Fastify's router decodes and
+    // normalises before matching, so `/%61pi/...`, `/API/...` and `//api/...`
+    // all reach the /api/ handlers while a raw-string prefix test sees
+    // something that does not begin with "/api/". All three bypassed this hook
+    // until it was moved onto routeOptions.url, which is the canonical pattern
+    // the router actually matched.
+    const route = request.routeOptions?.url ?? '';
 
-    if (url.startsWith('/api/')) {
+    if (route.startsWith('/api/')) {
       const header = String(request.headers.authorization ?? '');
       const presented = header.startsWith('Bearer ') ? header.slice(7) : String(request.headers['x-kirana-console'] ?? '');
       // A sandbox is meant to be driven, not admired. Test credentials only.
@@ -71,13 +79,29 @@ export function buildApp() {
       // POST -- so the verb is the whole distinction.
       if (request.method === 'GET') return;
 
+      // A failed console auth is both rate-limited and recorded. Without this
+      // a credential-stuffing run against the approve endpoint is unlimited and
+      // leaves nothing in the very audit trail this project offers as evidence.
+      const source = request.ip || 'unknown';
+      const attempts = rateLimit(`console-auth:${source}`, 10, 60_000);
+      record({
+        actor: `anonymous:${source}`,
+        action: 'console.auth_failed',
+        subjectId: null,
+        outcome: 'blocked',
+        detail: { route, method: request.method, tokenPresented: presented.length > 0, rateLimited: !attempts.ok },
+      });
+      if (!attempts.ok) {
+        return reply.code(429).header('retry-after', Math.ceil(attempts.retryAfterMs / 1000))
+          .send({ error: 'rate_limited', message: 'Too many failed attempts.' });
+      }
       return reply.code(401).send({
         error: 'unauthorized',
         message: 'Approving, connecting a shop and pausing need the operator token.',
       });
     }
 
-    if (url.startsWith('/mcp/')) {
+    if (route.startsWith('/mcp/')) {
       const key = String(request.headers['x-kirana-agent-key'] ?? '');
       const label = String(request.headers['x-kirana-agent'] ?? '');
       const identity = key ? (agentForKey(key)?.id ?? null) : null;
@@ -89,9 +113,15 @@ export function buildApp() {
       }
       // A verified key wins; otherwise a self-asserted label is accepted but
       // stays permanently capped at the unregistered ceiling.
-      (request as unknown as { agentId: string | null }).agentId = identity ?? (label || null);
+      const req = request as unknown as { agentId: string | null; identityProven: boolean };
+      req.agentId = identity ?? (label || null);
+      // Proven ONLY by a key that matched. A name in a header proves nothing.
+      req.identityProven = Boolean(identity);
 
-      const bucket = identity ?? label ?? (request.ip || 'anon');
+      // Only a VERIFIED identity gets its own budget. A self-asserted header is
+      // free to rotate, so bucketing on it means no limit at all; anonymous and
+      // name-only callers are bucketed by source address instead.
+      const bucket = identity || `ip:${request.ip || 'unknown'}`;
       const limited = rateLimit(`mcp:${bucket}`, 120, 60_000);
       if (!limited.ok) {
         return reply.code(429).header('retry-after', Math.ceil(limited.retryAfterMs / 1000)).send({
@@ -390,10 +420,11 @@ export function buildApp() {
     }
 
     const agentId = (request as unknown as { agentId?: string | null }).agentId ?? null;
+    const identityProven = (request as unknown as { identityProven?: boolean }).identityProven === true;
     // Register on FIRST CONTACT, not on first purchase. An agent that has only
     // browsed is still an agent the merchant should be able to see and cap.
     ensureAgent(agentId);
-    const server = buildMcpServer(merchant, agentId);
+    const server = buildMcpServer(merchant, agentId, identityProven);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
     reply.raw.on('close', () => {
@@ -418,7 +449,9 @@ export function buildApp() {
   if (bundle.index) {
     app.log.info(`console bundle       ${bundle.count} files, ${(bundle.bytes / 1024).toFixed(0)} KB, served from memory`);
     app.setNotFoundHandler((request, reply) => {
-      if (request.url.startsWith('/api') || request.url.startsWith('/mcp') || request.url.startsWith('/webhooks')) {
+      let decoded = request.url;
+      try { decoded = decodeURIComponent(request.url); } catch { /* keep raw */ }
+      if (/^\/+(api|mcp|webhooks)\b/i.test(decoded)) {
         return reply.code(404).send({ error: 'not found' });
       }
       const asset = lookup(bundle, request.url) ?? bundle.index!;
@@ -429,7 +462,9 @@ export function buildApp() {
     });
   } else {
     app.setNotFoundHandler((request, reply) => {
-      if (request.url.startsWith('/api') || request.url.startsWith('/mcp') || request.url.startsWith('/webhooks')) {
+      let decoded = request.url;
+      try { decoded = decodeURIComponent(request.url); } catch { /* keep raw */ }
+      if (/^\/+(api|mcp|webhooks)\b/i.test(decoded)) {
         return reply.code(404).send({ error: 'not found' });
       }
       return reply.code(404).send({
