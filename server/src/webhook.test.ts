@@ -9,6 +9,7 @@ process.env.KIRANA_DB = `data/test-webhook-${process.pid}.db`;
 process.env.KIRANA_SIGNING_SECRET = 'd'.repeat(64);
 process.env.KIRANA_QUIET = '1';
 process.env.KIRANA_CONSOLE_TOKEN = 'test-console-token';
+process.env.KIRANA_ACCESS = 'locked';
 process.env.RAZORPAY_KEY_ID = 'rzp_test_fake123456';
 process.env.RAZORPAY_KEY_SECRET = 'fakesecret';
 process.env.RAZORPAY_WEBHOOK_SECRET = 'whsec_test_kirana';

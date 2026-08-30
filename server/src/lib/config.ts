@@ -66,19 +66,33 @@ if (!signingSecret) {
 }
 
 /**
- * On a public demo instance, READING is open and ACTING is not.
+ * Access model. Two modes, and the default is chosen by where the server sits.
  *
- * A locked-out judge sees nothing, and a wide-open console lets a stranger
- * approve spending. Splitting on the verb gives both: anyone can watch the
- * catalogue, the orders and the audit trail live; approving, ingesting,
- * pausing or issuing keys still needs the operator's token. Off by default --
- * a local instance stays fully locked.
+ *   demo   — nothing is gated. For the public sandbox a judge opens, and for
+ *            local development, where a login wall is pure friction.
+ *   locked — reading is open, but approving, connecting a shop, pausing or
+ *            issuing a key needs the operator's token. For anything real.
+ *
+ * The default is `demo` on plain localhost and `locked` the moment the server
+ * is publicly reachable (PUBLIC_ORIGIN set), because a console exposed to the
+ * internet should not be open by accident. KIRANA_ACCESS overrides both.
+ *
+ * The public sandbox deliberately runs `demo` with a permanent banner. That is
+ * not a hole in the security model — it is Razorpay TEST credentials, where no
+ * real money can move, the server refuses to start on a live key, and every
+ * spend is still capped at ₹2,000 per order. The threat model in SECURITY.md
+ * describes a real merchant's console; a sandbox anyone can drive is the point.
  */
-const publicReadonly = opt('KIRANA_PUBLIC_READONLY', 'false') === 'true';
+const accessRaw = opt('KIRANA_ACCESS').toLowerCase();
+const access: 'demo' | 'locked' =
+  accessRaw === 'demo' || accessRaw === 'locked'
+    ? accessRaw
+    : (opt('PUBLIC_ORIGIN') ? 'locked' : 'demo');
 
 export const config = {
   port: Number(opt('PORT', '3000')),
-  publicReadonly,
+  access,
+  isDemo: access === 'demo',
   publicOrigin: opt('PUBLIC_ORIGIN').replace(/\/+$/, ''),
   dbPath: opt('KIRANA_DB', 'data/kirana.db'),
   signingSecret,
@@ -104,12 +118,12 @@ export function describeConfig(): string[] {
   lines.push(`razorpay            ${config.razorpay.configured ? `configured (${config.razorpay.keyId.slice(0, 16)}…, TEST mode)` : 'NOT configured — checkout disabled'}`);
   lines.push(`razorpay webhooks   ${config.razorpay.webhookSecret ? 'secret present' : 'no secret — webhook verification disabled'}`);
   lines.push(`quote signing       ${config.signingIsEphemeral ? 'EPHEMERAL (set KIRANA_SIGNING_SECRET to persist across restarts)' : 'persistent secret'}`);
-  lines.push(`console access      ${config.publicReadonly ? 'PUBLIC READ-ONLY (actions still need the token)' : 'token required for everything'}`);
+  lines.push(`console access      ${config.isDemo ? 'DEMO — open, no token needed (sandbox)' : 'LOCKED — token required to approve, connect or pause'}`);
   lines.push(`llm provider        ${config.llm.provider}${config.llm.provider === 'none' ? ' (structured-feed ingestion only)' : ''}`);
   if (config.publicOrigin && !config.razorpay.webhookSecret) {
     lines.push('WARNING             publicly reachable with no webhook secret — webhooks will be refused');
   }
-  if (config.consoleTokenGenerated) {
+  if (config.consoleTokenGenerated && !config.isDemo) {
     lines.push('');
     lines.push('  Console token (generated for this run — set KIRANA_CONSOLE_TOKEN to keep it):');
     lines.push(`      ${config.consoleToken}`);

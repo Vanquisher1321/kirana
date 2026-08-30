@@ -7,6 +7,7 @@ process.env.KIRANA_DB = `data/test-app-${process.pid}.db`;
 process.env.KIRANA_SIGNING_SECRET = 'b'.repeat(64);
 process.env.KIRANA_QUIET = '1';
 process.env.KIRANA_CONSOLE_TOKEN = 'test-console-token';
+process.env.KIRANA_ACCESS = 'locked';
 
 const { buildApp } = await import('./app.ts');
 const { ingestStorefront } = await import('./catalog/ingest.ts');
@@ -235,16 +236,22 @@ test('SECURITY: the console refuses to act without a token', async () => {
   });
   assert.equal(bare.status, 401, 'approving without a token must be refused');
 
-  // A wrong token.
-  const wrong = await fetch(`${base}/api/approvals`, { headers: { authorization: 'Bearer not-the-token' } });
+  // A wrong token cannot ACT, even though reading is open.
+  const wrong = await fetch(`${base}/api/approvals/${id}/approve`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer not-the-token' }, body: '{}',
+  });
   assert.equal(wrong.status, 401);
 
   // An empty token must never authenticate.
-  const empty = await fetch(`${base}/api/approvals`, { headers: { authorization: 'Bearer ' } });
+  const empty = await fetch(`${base}/api/approvals/${id}/approve`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' }, body: '{}',
+  });
   assert.equal(empty.status, 401);
 
-  // Reading the audit trail and pausing the system are protected too.
-  assert.equal((await fetch(`${base}/api/audit`)).status, 401);
+  // Reading is deliberately open so the console stays legible without a token.
+  assert.equal((await fetch(`${base}/api/audit`)).status, 200);
+
+  // Pausing the whole system is not.
   assert.equal((await fetch(`${base}/api/system/kill-switch`, { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } })).status, 401);
 });
 
@@ -291,21 +298,21 @@ test('SECURITY: an issued key produces a verified agent whose caps CAN be raised
   assert.equal(raised.status, 200);
 });
 
-test('PUBLIC DEMO: reading is open but acting still needs the token', async () => {
-  // The deployed instance runs with KIRANA_PUBLIC_READONLY=true. Simulated here
-  // by asserting the split the hook makes: GET is the read surface, and every
-  // endpoint that spends, approves, ingests or pauses is a POST.
+test('LOCKED MODE: reading is open but acting still needs the token', async () => {
+  // This test process sets PUBLIC_ORIGIN implicitly off but KIRANA_ACCESS is
+  // unset, so it runs LOCKED (a token is present in these tests). The split the
+  // hook makes: GET is the read surface, and every endpoint that spends,
+  // approves, ingests or pauses is a POST.
   const readEndpoints = ['/api/merchants', '/api/audit', '/api/audit/verify', '/api/orders', '/api/agents', '/api/system', '/api/approvals'];
   for (const path of readEndpoints) {
     const withToken = await authFetch(`${base}${path}`);
     assert.equal(withToken.status, 200, `${path} readable with a token`);
   }
 
-  // Without the flag set in this test process, reads are still refused —
-  // proving the default is locked, not open.
+  // Reads stay open even without a token, so the console is legible.
   for (const path of readEndpoints) {
     const bare = await fetch(`${base}${path}`);
-    assert.equal(bare.status, 401, `${path} is locked by default`);
+    assert.equal(bare.status, 200, `${path} is readable without a token`);
   }
 
   // And the write surface is refused without a token either way.

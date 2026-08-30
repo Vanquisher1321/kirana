@@ -74,7 +74,8 @@ export default function App() {
 
   if (locked) return <Unlock onUnlocked={() => { setLocked(false); void refresh(); }} />;
 
-  const watching = Boolean(data.system?.publicReadonly) && !getToken();
+  const demo = Boolean(data.system?.demo);
+  const watching = !demo && !getToken();
   const paused = data.system?.killSwitch.engaged ?? false;
   const pending = data.approvals.length;
 
@@ -104,7 +105,8 @@ export default function App() {
             <i className={`livedot ${paused ? 'bad' : ''}`} />
             {paused ? 'Spending paused' : 'Live'}
           </span>
-          {!watching && getToken() && (
+          {demo && <span className="live" style={{ color: '#FCD34D', borderColor: '#3F3520' }}>Sandbox · test mode</span>}
+          {!demo && getToken() && (
             <button className="persona" onClick={() => { clearToken(); setLocked(true); }}>Lock</button>
           )}
         </div>
@@ -157,9 +159,18 @@ export default function App() {
 
         <main className="main">
           <div className={persona === 'shopper' ? 'page narrow' : 'page'}>
+            {demo && !needToken && (
+              <div className="banner warn" style={{ marginBottom: 20 }}>
+                <span>
+                  <strong>Sandbox.</strong> Everything here works and everything you see is real — but it runs on
+                  Razorpay <strong>test</strong> credentials, so no real money can move. Go ahead and approve something.
+                </span>
+              </div>
+            )}
+
             {watching && !needToken && (
               <div className="banner warn" style={{ marginBottom: 20 }}>
-                <span>You are watching a live demo. Everything here is real — approving, connecting a shop and pausing need the operator's token.</span>
+                <span>Approving, connecting a shop and pausing need the operator's token.</span>
                 <button className="btn sm ghost" style={{ marginLeft: 'auto' }} onClick={() => setNeedToken(true)}>I have the token</button>
               </div>
             )}
