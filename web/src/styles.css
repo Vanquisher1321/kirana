@@ -32,6 +32,9 @@
   --warn-bg: #FFFBEB;
   --warn-line: #FDE68A;
 
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
   --sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -89,8 +92,9 @@ input, select { font: inherit; }
 .brandsub { font-size: 11px; color: var(--faint); padding-left: 10px; border-left: 1px solid var(--topbar-line); }
 
 .personas { display: flex; gap: 2px; padding: 3px; background: #111827; border: 1px solid #1F2937; border-radius: 9px; }
-.persona { padding: 6px 14px; border-radius: 7px; font-size: 12px; font-weight: 600; color: #9CA3AF; transition: background .14s, color .14s; }
+.persona { padding: 6px 14px; border-radius: 7px; font-size: 12px; font-weight: 600; color: #9CA3AF; transition: background .14s, color .14s, transform .1s var(--ease-out); }
 .persona:hover { color: #E5E7EB; }
+.persona:active { transform: scale(.97); }
 .persona[aria-selected="true"] { background: #F9FAFB; color: #0B1020; }
 
 .live.sandbox { color: #FCD34D; border-color: rgba(252, 211, 77, .28); background: rgba(252, 211, 77, .08); }
@@ -113,9 +117,10 @@ input, select { font: inherit; }
 .navitem {
   display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
   padding: 8px 10px; border-radius: 8px; font-size: 13px; font-weight: 500;
-  color: var(--ink-2); transition: background .12s, color .12s;
+  color: var(--ink-2); transition: background .12s, color .12s, transform .1s var(--ease-out);
 }
 .navitem:hover { background: var(--line-3); }
+.navitem:active { transform: scale(.985); }
 .navitem[aria-selected="true"] { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
 .navbadge { margin-left: auto; font-size: 10px; font-weight: 600; color: var(--accent); background: var(--accent-bg); padding: 1px 6px; border-radius: 20px; }
 .navdiv { height: 1px; background: var(--line); margin: 8px 10px; }
@@ -123,7 +128,7 @@ input, select { font: inherit; }
 .sidefoot { border: 1px solid var(--side-line); border-radius: 10px; padding: 12px; background: var(--card-2); }
 
 .main { flex: 1; overflow: auto; min-width: 0; }
-.page { padding: 28px 32px 48px; max-width: 1240px; animation: fadeUp .25s ease both; }
+.page { padding: 28px 32px 48px; max-width: 1240px; animation: fadeUp .16s var(--ease-out) both; }
 .page.narrow { max-width: 880px; }
 
 /* ---------- type ---------- */
@@ -157,9 +162,10 @@ input, select { font: inherit; }
 .kpi .s { font-size: 12px; color: var(--faint); margin-top: 4px; }
 .delta { font-size: 11.5px; font-weight: 600; color: var(--ok-deep); background: var(--ok-bg); border: 1px solid var(--ok-line); padding: 1px 7px; border-radius: 20px; margin-left: 8px; }
 
-.btn { font-size: 13px; font-weight: 600; color: #fff; background: var(--accent); border-radius: 9px; padding: 9px 16px; transition: background .14s; }
+.btn { font-size: 13px; font-weight: 600; color: #fff; background: var(--accent); border-radius: 9px; padding: 9px 16px; transition: background .14s, transform .1s var(--ease-out); }
 .btn:hover:not(:disabled) { background: var(--accent-deep); }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn:active:not(:disabled) { transform: scale(.97); }
+.btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 .btn.dark { background: var(--ink); color: var(--card); }
 .btn.ghost { background: var(--card); color: var(--ink-2); border: 1px solid var(--line); font-weight: 500; }
 .btn.ghost:hover:not(:disabled) { border-color: #C7CBD4; background: var(--card); }
@@ -196,7 +202,7 @@ tr:hover td { background: var(--card-2); }
 .banner.bad { background: var(--bad-bg); border: 1px solid var(--bad-line); color: var(--bad-deep); }
 .banner.warn { background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn); }
 
-.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: -2px; }
 
 @media (max-width: 860px) {
   .side { display: none; }
