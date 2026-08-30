@@ -174,6 +174,7 @@ db.exec(SCHEMA);
 // attempted and ignored when already applied.
 for (const stmt of [
   'ALTER TABLE orders ADD COLUMN razorpay_payment_link_id TEXT',
+  'ALTER TABLE agents ADD COLUMN verified INTEGER NOT NULL DEFAULT 0',
 ]) {
   try { db.exec(stmt); } catch { /* already applied */ }
 }

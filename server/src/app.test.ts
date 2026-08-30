@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 process.env.KIRANA_DB = `data/test-app-${process.pid}.db`;
 process.env.KIRANA_SIGNING_SECRET = 'b'.repeat(64);
 process.env.KIRANA_QUIET = '1';
+process.env.KIRANA_CONSOLE_TOKEN = 'test-console-token';
 
 const { buildApp } = await import('./app.ts');
 const { ingestStorefront } = await import('./catalog/ingest.ts');
@@ -38,6 +39,11 @@ async function rpc(method: string, params?: unknown, idNum = 1): Promise<Record<
   const frames = text.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim());
   const payload = frames.length ? frames[frames.length - 1]! : text;
   return JSON.parse(payload) as Record<string, unknown>;
+}
+
+/** The console is authenticated; every /api call must carry the token. */
+function authFetch(url: string, init: RequestInit = {}) {
+  return fetch(url, { ...init, headers: { ...(init.headers ?? {}), authorization: 'Bearer test-console-token' } });
 }
 
 function toolJson(result: Record<string, unknown>): Record<string, unknown> {
@@ -119,11 +125,11 @@ test('an agent asking to spend more than the basket is told to ask the human', a
 });
 
 test('the console can approve a pending request, and only a human can', async () => {
-  const approvals = await (await fetch(`${base}/api/approvals`)).json() as Array<{ id: string; capFormatted: string }>;
+  const approvals = await (await authFetch(`${base}/api/approvals`)).json() as Array<{ id: string; capFormatted: string }>;
   assert.ok(approvals.length >= 1);
   const target = approvals[0]!;
   assert.match(target.capFormatted, /^₹/);
-  const res = await fetch(`${base}/api/approvals/${target.id}/approve`, {
+  const res = await authFetch(`${base}/api/approvals/${target.id}/approve`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ by: 'om' }),
   });
   const granted = await res.json() as { status: string; grantedBy: string };
@@ -132,13 +138,13 @@ test('the console can approve a pending request, and only a human can', async ()
 });
 
 test('the kill switch is reachable from the console and reported by the API', async () => {
-  await fetch(`${base}/api/system/kill-switch`, {
+  await authFetch(`${base}/api/system/kill-switch`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ engage: true, reason: 'test' }),
   });
-  const sys = await (await fetch(`${base}/api/system`)).json() as { killSwitch: { engaged: boolean } };
+  const sys = await (await authFetch(`${base}/api/system`)).json() as { killSwitch: { engaged: boolean } };
   assert.equal(sys.killSwitch.engaged, true);
-  await fetch(`${base}/api/system/kill-switch`, {
+  await authFetch(`${base}/api/system/kill-switch`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ engage: false }),
   });
 });
@@ -209,11 +215,78 @@ test('an unknown merchant slug is refused as JSON-RPC, not a stack trace', async
 });
 
 test('the audit chain covers the agent session and still verifies', async () => {
-  const v = await (await fetch(`${base}/api/audit/verify`)).json() as { ok: boolean; checked: number };
+  const v = await (await authFetch(`${base}/api/audit/verify`)).json() as { ok: boolean; checked: number };
   assert.equal(v.ok, true);
-  const rows = await (await fetch(`${base}/api/audit`)).json() as Array<{ action: string }>;
+  const rows = await (await authFetch(`${base}/api/audit`)).json() as Array<{ action: string }>;
   const actions = new Set(rows.map((r) => r.action));
   assert.ok(actions.has('catalog.searched'));
   assert.ok(actions.has('quote.created'));
   assert.ok(actions.has('quote.rejected'));
+});
+
+
+test('SECURITY: the console refuses to act without a token', async () => {
+  const approvals = await (await authFetch(`${base}/api/approvals`)).json() as Array<{ id: string }>;
+  const id = approvals[0]?.id ?? 'csnt_none';
+
+  // No token at all.
+  const bare = await fetch(`${base}/api/approvals/${id}/approve`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  });
+  assert.equal(bare.status, 401, 'approving without a token must be refused');
+
+  // A wrong token.
+  const wrong = await fetch(`${base}/api/approvals`, { headers: { authorization: 'Bearer not-the-token' } });
+  assert.equal(wrong.status, 401);
+
+  // An empty token must never authenticate.
+  const empty = await fetch(`${base}/api/approvals`, { headers: { authorization: 'Bearer ' } });
+  assert.equal(empty.status, 401);
+
+  // Reading the audit trail and pausing the system are protected too.
+  assert.equal((await fetch(`${base}/api/audit`)).status, 401);
+  assert.equal((await fetch(`${base}/api/system/kill-switch`, { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } })).status, 401);
+});
+
+test('SECURITY: the buyer-agent endpoint stays open, because discovery cannot need a password', async () => {
+  const r = await rpc('tools/list', {}, 90);
+  assert.ok((r.result as { tools: unknown[] }).tools.length > 0, 'an unauthenticated agent can still shop');
+});
+
+test('SECURITY: an unrecognised agent key is rejected rather than downgraded', async () => {
+  const res = await fetch(`${base}/mcp/bluehill-example`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-kirana-agent-key': 'kag_totally_made_up' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+  });
+  assert.equal(res.status, 401);
+});
+
+test('SECURITY: a self-asserted agent name cannot have its spending caps raised', async () => {
+  await fetch(`${base}/mcp/bluehill-example`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-kirana-agent': 'impostor' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_merchant_info', arguments: {} } }),
+  });
+  const res = await authFetch(`${base}/api/agents/impostor/caps`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ perOrderMinor: 100000000, dailyMinor: 100000000 }),
+  });
+  assert.equal(res.status, 409);
+  const body = await res.json() as { message: string };
+  assert.match(body.message, /unverified/);
+});
+
+test('SECURITY: an issued key produces a verified agent whose caps CAN be raised', async () => {
+  const issued = await (await authFetch(`${base}/api/agents/trusted-buyer/key`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label: 'Trusted buyer' }),
+  })).json() as { apiKey: string; agent: { verified: boolean } };
+  assert.ok(issued.apiKey.startsWith('kag_'));
+  assert.equal(issued.agent.verified, true);
+
+  const raised = await authFetch(`${base}/api/agents/trusted-buyer/caps`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ perOrderMinor: 500000, dailyMinor: 2000000 }),
+  });
+  assert.equal(raised.status, 200);
 });

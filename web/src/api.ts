@@ -28,11 +28,37 @@ export interface SystemState {
 }
 export interface Verification { ok: boolean; checked: number; brokenAtSeq?: number; reason?: string; }
 
+/**
+ * The console token. Kept in localStorage because this console is a
+ * single-operator tool on the operator's own machine -- there is no session
+ * server to hold it and no second user to leak it to.
+ */
+const TOKEN_KEY = 'kirana.console.token';
+
+export function getToken(): string {
+  try { return localStorage.getItem(TOKEN_KEY) ?? ''; } catch { return ''; }
+}
+export function setToken(t: string): void {
+  try { localStorage.setItem(TOKEN_KEY, t.trim()); } catch { /* private mode */ }
+}
+export function clearToken(): void {
+  try { localStorage.removeItem(TOKEN_KEY); } catch { /* private mode */ }
+}
+
+export class Unauthorized extends Error {
+  constructor() { super('A console token is required.'); this.name = 'Unauthorized'; }
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
-    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${getToken()}`,
+      ...(init?.headers ?? {}),
+    },
   });
+  if (res.status === 401) throw new Unauthorized();
   const text = await res.text();
   const body = text ? JSON.parse(text) : {};
   if (!res.ok) throw new Error((body as { error?: string; message?: string }).message ?? (body as { error?: string }).error ?? `Request failed (${res.status})`);

@@ -10,7 +10,8 @@ import { listPendingConsents, approveConsent, rejectConsent, revokeConsent, getC
 import { getQuote } from './checkout/quote.ts';
 import { listOrders, getOrder, settleOrder } from './checkout/checkout.ts';
 import { reconcile } from './checkout/reconcile.ts';
-import { listAgents, setAgentCaps } from './checkout/agents.ts';
+import { listAgents, setAgentCaps, issueAgentKey, agentForKey, ensureAgent } from './checkout/agents.ts';
+import { secretEquals, rateLimit } from './lib/security.ts';
 import { KILL_SWITCH, engageKillSwitch, releaseKillSwitch } from './checkout/guard.ts';
 import { circuitState } from './razorpay/client.ts';
 import { createHmac, timingSafeEqual } from 'node:crypto';
@@ -41,6 +42,56 @@ export function buildApp() {
     }
   });
 
+  /**
+   * Two different callers, two different rules.
+   *
+   *   /api/*  is the HUMAN console. It can approve spending, pause the system
+   *           and read the audit trail, so it requires a bearer token.
+   *   /mcp/*  is the BUYER AGENT surface. It must stay open -- an ecosystem
+   *           where any agent can shop any merchant cannot gate discovery
+   *           behind a credential -- so it is protected by caps, consent and
+   *           rate limits instead of by a password.
+   *
+   * Getting this backwards is the common mistake: people authenticate the
+   * agent and leave the approve button open.
+   */
+  app.addHook('onRequest', async (request, reply) => {
+    const url = request.url;
+
+    if (url.startsWith('/api/')) {
+      const header = String(request.headers.authorization ?? '');
+      const presented = header.startsWith('Bearer ') ? header.slice(7) : String(request.headers['x-kirana-console'] ?? '');
+      if (!secretEquals(presented, config.consoleToken)) {
+        return reply.code(401).send({ error: 'unauthorized', message: 'A console token is required. It is printed in the server log at startup.' });
+      }
+      return;
+    }
+
+    if (url.startsWith('/mcp/')) {
+      const key = String(request.headers['x-kirana-agent-key'] ?? '');
+      const label = String(request.headers['x-kirana-agent'] ?? '');
+      const identity = key ? (agentForKey(key)?.id ?? null) : null;
+      if (key && !identity) {
+        return reply.code(401).send({
+          jsonrpc: '2.0', id: null,
+          error: { code: -32002, message: 'That agent key is not recognised.' },
+        });
+      }
+      // A verified key wins; otherwise a self-asserted label is accepted but
+      // stays permanently capped at the unregistered ceiling.
+      (request as unknown as { agentId: string | null }).agentId = identity ?? (label || null);
+
+      const bucket = identity ?? label ?? (request.ip || 'anon');
+      const limited = rateLimit(`mcp:${bucket}`, 120, 60_000);
+      if (!limited.ok) {
+        return reply.code(429).header('retry-after', Math.ceil(limited.retryAfterMs / 1000)).send({
+          jsonrpc: '2.0', id: null,
+          error: { code: -32003, message: 'Too many requests. Slow down and retry shortly.' },
+        });
+      }
+    }
+  });
+
   app.get('/health', async () => ({ ok: true, service: 'kirana', razorpay: config.razorpay.configured }));
 
   // ---------------------------------------------------------------------------
@@ -66,6 +117,11 @@ export function buildApp() {
   app.post('/api/ingest', async (request, reply) => {
     const body = request.body as { url?: string } | undefined;
     if (!body?.url) return reply.code(400).send({ error: 'url is required' });
+    // Crawling is expensive for us and for the shop being read.
+    const limited = rateLimit('ingest', 10, 60_000);
+    if (!limited.ok) {
+      return reply.code(429).send({ error: 'rate_limited', message: `Too many ingestions. Retry in ${Math.ceil(limited.retryAfterMs / 1000)}s.` });
+    }
     try {
       const report = await ingestStorefront(body.url);
       const merchant = getMerchant(report.merchantId)!;
@@ -183,8 +239,24 @@ export function buildApp() {
   app.post('/api/agents/:id/caps', async (request, reply) => {
     const { id } = request.params as { id: string };
     const b = request.body as { perOrderMinor?: number; dailyMinor?: number };
-    const updated = setAgentCaps(id, Number(b.perOrderMinor), Number(b.dailyMinor));
-    return updated ?? reply.code(404).send({ error: 'not_found' });
+    try {
+      const updated = setAgentCaps(id, Number(b.perOrderMinor), Number(b.dailyMinor));
+      return updated ?? reply.code(404).send({ error: 'not_found' });
+    } catch (err) {
+      return reply.code(409).send({ error: 'unverified_agent', message: (err as Error).message });
+    }
+  });
+
+  app.post('/api/agents/:id/key', async (request) => {
+    const { id } = request.params as { id: string };
+    const label = (request.body as { label?: string } | undefined)?.label ?? id;
+    const { agent, apiKey } = issueAgentKey(id, label);
+    return {
+      agent,
+      apiKey,
+      note: 'Copy this now — only its hash is stored, so it cannot be shown again.',
+      usage: 'Send it as the x-kirana-agent-key header on the MCP endpoint.',
+    };
   });
 
   // Manual sweep, for the console button and for a demo with no tunnel.
@@ -229,12 +301,20 @@ export function buildApp() {
         });
         return reply.code(400).send({ error: 'invalid signature' });
       }
+    } else if (config.publicOrigin) {
+      // Publicly reachable and unable to verify: refuse. Accepting unsigned
+      // "payment captured" events from the open internet would let anyone mark
+      // any order paid. The reconciler settles these orders safely anyway.
+      record({
+        actor: 'razorpay:webhook', action: 'webhook.refused', subjectId: null, outcome: 'blocked',
+        detail: { reason: 'server is publicly reachable but RAZORPAY_WEBHOOK_SECRET is not set' },
+      });
+      return reply.code(503).send({ error: 'webhook verification is not configured on this server' });
     } else {
-      // Refusing outright would make local development impossible, but running
-      // unverified must never be silent.
+      // Local-only development: allowed, but never silently.
       record({
         actor: 'razorpay:webhook', action: 'webhook.unverified', subjectId: null, outcome: 'blocked',
-        detail: { reason: 'RAZORPAY_WEBHOOK_SECRET is not set; anyone who can reach this URL can post here' },
+        detail: { reason: 'RAZORPAY_WEBHOOK_SECRET is not set (local development only)' },
       });
     }
 
@@ -298,7 +378,10 @@ export function buildApp() {
       });
     }
 
-    const agentId = (request.headers['x-kirana-agent'] as string | undefined) ?? null;
+    const agentId = (request as unknown as { agentId?: string | null }).agentId ?? null;
+    // Register on FIRST CONTACT, not on first purchase. An agent that has only
+    // browsed is still an agent the merchant should be able to see and cap.
+    ensureAgent(agentId);
     const server = buildMcpServer(merchant, agentId);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 

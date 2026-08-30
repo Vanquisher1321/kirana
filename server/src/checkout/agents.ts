@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { hashKey, newApiKey } from '../lib/security.ts';
 import { db, nowIso } from '../lib/db.ts';
 import { record } from '../audit/ledger.ts';
 import { ANON_PER_ORDER_CAP_MINOR, ANON_DAILY_CAP_MINOR } from './guard.ts';
@@ -20,6 +20,13 @@ export interface Agent {
   dailyCapMinor: number;
   perOrderCapMinor: number;
   active: boolean;
+  /**
+   * True only when the agent proved possession of an issued key. A name in a
+   * header proves nothing -- any caller can claim to be any agent -- so
+   * unverified agents are permanently pinned to the conservative default caps
+   * and cannot have them raised.
+   */
+  verified: boolean;
   createdAt: string;
 }
 
@@ -27,7 +34,8 @@ function rowToAgent(r: Record<string, unknown>): Agent {
   return {
     id: String(r.id), label: String(r.label),
     dailyCapMinor: Number(r.daily_cap_minor), perOrderCapMinor: Number(r.per_order_cap_minor),
-    active: Number(r.active) === 1, createdAt: String(r.created_at),
+    active: Number(r.active) === 1, verified: Number(r.verified ?? 0) === 1,
+    createdAt: String(r.created_at),
   };
 }
 
@@ -48,12 +56,13 @@ export function ensureAgent(agentId: string | null, label?: string): Agent | nul
     dailyCapMinor: ANON_DAILY_CAP_MINOR,
     perOrderCapMinor: ANON_PER_ORDER_CAP_MINOR,
     active: true,
+    verified: false,
     createdAt: nowIso(),
   };
   db.prepare(
-    `INSERT INTO agents (id, label, api_key_hash, daily_cap_minor, per_order_cap_minor, active, created_at)
-     VALUES (?,?,?,?,?,1,?)`,
-  ).run(agent.id, agent.label, createHash('sha256').update(agent.id).digest('hex'),
+    `INSERT INTO agents (id, label, api_key_hash, daily_cap_minor, per_order_cap_minor, active, verified, created_at)
+     VALUES (?,?,?,?,?,1,0,?)`,
+  ).run(agent.id, agent.label, hashKey(`unverified:${agent.id}`),
     agent.dailyCapMinor, agent.perOrderCapMinor, agent.createdAt);
 
   record({
@@ -64,7 +73,8 @@ export function ensureAgent(agentId: string | null, label?: string): Agent | nul
     detail: {
       label: agent.label, firstSeen: agent.createdAt,
       perOrderCapMinor: agent.perOrderCapMinor, dailyCapMinor: agent.dailyCapMinor,
-      note: 'Auto-registered on first contact with default caps.',
+      verified: false,
+      note: 'Auto-registered on first contact. Identity is self-asserted, so caps stay at the default until a key is issued.',
     },
   });
 
@@ -75,9 +85,40 @@ export function listAgents(): Agent[] {
   return (db.prepare('SELECT * FROM agents ORDER BY created_at DESC').all() as Record<string, unknown>[]).map(rowToAgent);
 }
 
+/** Issues a real key. The plaintext is returned once and never stored. */
+export function issueAgentKey(agentId: string, label: string, by = 'human'): { agent: Agent; apiKey: string } {
+  const apiKey = newApiKey('kag');
+  const existing = getAgent(agentId);
+  if (existing) {
+    db.prepare('UPDATE agents SET api_key_hash = ?, verified = 1, label = ? WHERE id = ?').run(hashKey(apiKey), label, agentId);
+  } else {
+    db.prepare(
+      `INSERT INTO agents (id, label, api_key_hash, daily_cap_minor, per_order_cap_minor, active, verified, created_at)
+       VALUES (?,?,?,?,?,1,1,?)`,
+    ).run(agentId, label, hashKey(apiKey), ANON_DAILY_CAP_MINOR, ANON_PER_ORDER_CAP_MINOR, nowIso());
+  }
+  record({
+    actor: `human:${by}`, action: 'agent.key_issued', subjectId: agentId, outcome: 'ok',
+    detail: { label, note: 'Key hash stored; the key itself is shown once and never persisted.' },
+  });
+  return { agent: getAgent(agentId)!, apiKey };
+}
+
+/** Resolves a presented key to an agent. Returns null when the key is unknown. */
+export function agentForKey(apiKey: string): Agent | null {
+  if (!apiKey) return null;
+  const r = db.prepare('SELECT * FROM agents WHERE api_key_hash = ? AND active = 1 AND verified = 1').get(hashKey(apiKey)) as Record<string, unknown> | undefined;
+  return r ? rowToAgent(r) : null;
+}
+
 export function setAgentCaps(agentId: string, perOrderMinor: number, dailyMinor: number, by = 'human'): Agent | null {
   const a = getAgent(agentId);
   if (!a) return null;
+  if (!a.verified) {
+    // Raising the ceiling on an identity nobody proved would let any caller
+    // inherit it just by sending the same header value.
+    throw new Error(`Agent ${agentId} is unverified (identity is self-asserted). Issue it a key before changing its caps.`);
+  }
   db.prepare('UPDATE agents SET per_order_cap_minor = ?, daily_cap_minor = ? WHERE id = ?').run(perOrderMinor, dailyMinor, agentId);
   record({
     actor: `human:${by}`, action: 'agent.caps_changed', subjectId: agentId, outcome: 'ok',

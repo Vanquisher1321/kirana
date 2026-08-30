@@ -1,4 +1,5 @@
 import type { FetchLike } from '../types.ts';
+import { assertFetchableUrl, assertPublicHost } from './security.ts';
 
 /**
  * Transport helpers, deliberately free of any database import so that tools
@@ -18,19 +19,50 @@ const DEFAULT_HEADERS = {
   'accept-language': 'en-IN,en;q=0.9',
 };
 
-/** Timeout plus an identifying user-agent. Politeness is not optional when reading someone's shop. */
-export function makeFetch(timeoutMs = 15_000): FetchLike {
+const MAX_REDIRECTS = 3;
+
+/**
+ * Fetch with a timeout, an identifying user-agent, and SSRF protection that
+ * survives redirects.
+ *
+ * Following redirects automatically would undo the host check entirely: a
+ * perfectly public URL can answer `302 Location: http://169.254.169.254/`, and
+ * an auto-following client walks straight into the private network on the
+ * attacker's behalf. So redirects are handled manually and every hop is
+ * re-validated before it is followed.
+ */
+export function makeFetch(timeoutMs = 15_000, opts: { guard?: boolean } = {}): FetchLike {
+  const guard = opts.guard !== false;
   return async (url, init) => {
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), timeoutMs);
-    try {
-      return await fetch(url, {
-        ...init,
-        signal: ctl.signal,
-        headers: { ...DEFAULT_HEADERS, ...(init?.headers as Record<string, string> | undefined) },
-      });
-    } finally {
-      clearTimeout(timer);
+    let current = String(url);
+    if (guard) await assertFetchableUrl(current);
+
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), timeoutMs);
+      try {
+        const res = await fetch(current, {
+          ...init,
+          signal: ctl.signal,
+          redirect: guard ? 'manual' : 'follow',
+          headers: { ...DEFAULT_HEADERS, ...(init?.headers as Record<string, string> | undefined) },
+        });
+
+        if (!guard || res.status < 300 || res.status >= 400) return res;
+
+        const location = res.headers.get('location');
+        if (!location) return res;
+
+        const next = new URL(location, current);
+        if (next.protocol !== 'https:' && next.protocol !== 'http:') {
+          throw new Error(`Refusing to follow a redirect to ${next.protocol}`);
+        }
+        await assertPublicHost(next.hostname);
+        current = next.toString();
+      } finally {
+        clearTimeout(timer);
+      }
     }
+    throw new Error(`Too many redirects (more than ${MAX_REDIRECTS}) starting from ${String(url)}`);
   };
 }

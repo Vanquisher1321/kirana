@@ -4,6 +4,7 @@ import { record } from '../audit/ledger.ts';
 import { nowIso } from '../lib/db.ts';
 import type { FetchLike, IngestOptions, StorefrontAdapter } from '../types.ts';
 import { normaliseOrigin, makeFetch } from '../lib/http.ts';
+import { assertFetchableUrl, BlockedHostError } from '../lib/security.ts';
 
 export { normaliseOrigin, makeFetch };
 
@@ -41,13 +42,37 @@ export interface IngestReport extends PersistSummary {
 
 export async function ingestStorefront(
   rawOrigin: string,
-  opts: Partial<IngestOptions> & { fetchImpl?: FetchLike } = {},
+  opts: Partial<IngestOptions> & { fetchImpl?: FetchLike; guard?: boolean } = {},
 ): Promise<IngestReport> {
   const origin = normaliseOrigin(rawOrigin);
   const fetchImpl = opts.fetchImpl ?? makeFetch();
+
+  // The SSRF guard protects the REAL network path. When a caller injects its
+  // own transport (tests, the offline seed) no request reaches the network at
+  // all, so DNS validation would only be rejecting fixture hostnames. The guard
+  // therefore defaults on and is skipped only for an explicitly injected fetch
+  // -- never because a hostname looked awkward.
+  const guard = opts.guard ?? !opts.fetchImpl;
   const options: IngestOptions = { maxProducts: opts.maxProducts ?? 500, llm: opts.llm };
   const startedAt = nowIso();
   const t0 = performance.now();
+
+  // Validated before a single request leaves the process. `origin` came from a
+  // user, and this endpoint's whole job is to fetch what a user names.
+  try {
+    if (guard) await assertFetchableUrl(origin);
+  } catch (err) {
+    record({
+      actor: 'console', action: 'ingest.refused', subjectId: origin, outcome: 'blocked',
+      detail: { origin, reason: err instanceof BlockedHostError ? err.reason : 'invalid target' },
+    });
+    throw new IngestError(
+      err instanceof BlockedHostError
+        ? `Refusing to fetch ${origin}: ${err.reason}. Only public web addresses can be ingested.`
+        : `Refusing to fetch ${origin}.`,
+      origin,
+    );
+  }
 
   record({ actor: 'console', action: 'ingest.started', subjectId: origin, outcome: 'ok', detail: { origin } });
 

@@ -48,6 +48,16 @@ function loadRazorpay(): RazorpayConfig {
   };
 }
 
+let consoleToken = opt('KIRANA_CONSOLE_TOKEN');
+let consoleTokenGenerated = false;
+if (!consoleToken) {
+  // Never default to "no authentication". An unset token means a fresh one is
+  // minted at boot and printed once -- inconvenient by design, because the
+  // alternative is a console that anyone who finds the URL can spend from.
+  consoleToken = randomBytes(18).toString('base64url');
+  consoleTokenGenerated = true;
+}
+
 let signingSecret = opt('KIRANA_SIGNING_SECRET');
 let signingIsEphemeral = false;
 if (!signingSecret) {
@@ -61,6 +71,8 @@ export const config = {
   dbPath: opt('KIRANA_DB', 'data/kirana.db'),
   signingSecret,
   signingIsEphemeral,
+  consoleToken,
+  consoleTokenGenerated,
   razorpay: loadRazorpay(),
   llm: {
     provider: opt('LLM_PROVIDER', 'none') as 'none' | 'ollama' | 'groq' | 'gemini',
@@ -81,5 +93,14 @@ export function describeConfig(): string[] {
   lines.push(`razorpay webhooks   ${config.razorpay.webhookSecret ? 'secret present' : 'no secret — webhook verification disabled'}`);
   lines.push(`quote signing       ${config.signingIsEphemeral ? 'EPHEMERAL (set KIRANA_SIGNING_SECRET to persist across restarts)' : 'persistent secret'}`);
   lines.push(`llm provider        ${config.llm.provider}${config.llm.provider === 'none' ? ' (structured-feed ingestion only)' : ''}`);
+  if (config.publicOrigin && !config.razorpay.webhookSecret) {
+    lines.push('WARNING             publicly reachable with no webhook secret — webhooks will be refused');
+  }
+  if (config.consoleTokenGenerated) {
+    lines.push('');
+    lines.push('  Console token (generated for this run — set KIRANA_CONSOLE_TOKEN to keep it):');
+    lines.push(`      ${config.consoleToken}`);
+    lines.push('  Paste it into the console when it asks. Anyone with this token can approve spending.');
+  }
   return lines;
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, type Agent, type Approval, type AuditRow, type Merchant, type Order, type SystemState, type Verification } from './api.ts';
+import { api, getToken, setToken, clearToken, Unauthorized, type Agent, type Approval, type AuditRow, type Merchant, type Order, type SystemState, type Verification } from './api.ts';
 import { describe, timeAgo, countdown } from './plain.ts';
 
 type Tab = 'shops' | 'approvals' | 'activity' | 'safety';
@@ -14,6 +14,7 @@ export default function App() {
   const [system, setSystem] = useState<SystemState | null>(null);
   const [seal, setSeal] = useState<Verification | null>(null);
   const [err, setErr] = useState('');
+  const [locked, setLocked] = useState(!getToken());
 
   const refresh = useCallback(async () => {
     try {
@@ -21,9 +22,10 @@ export default function App() {
         api.merchants(), api.approvals(), api.audit(), api.orders(), api.agents(), api.system(), api.verify(),
       ]);
       setMerchants(m); setApprovals(a); setAudit(l); setOrders(o); setAgents(g); setSystem(s); setSeal(v);
-      setErr('');
+      setErr(''); setLocked(false);
     } catch (e) {
-      setErr((e as Error).message);
+      if (e instanceof Unauthorized) { setLocked(true); setErr(''); }
+      else setErr((e as Error).message);
     }
   }, []);
 
@@ -32,6 +34,8 @@ export default function App() {
     const t = setInterval(() => void refresh(), 3000);
     return () => clearInterval(t);
   }, [refresh]);
+
+  if (locked) return <Unlock onUnlocked={() => void refresh()} />;
 
   return (
     <div className="shell">
@@ -53,6 +57,7 @@ export default function App() {
             <i className={`dot ${system?.killSwitch.engaged ? 'bad' : 'good'}`} />
             {system?.killSwitch.engaged ? 'AI spending PAUSED' : 'AI spending allowed'}
           </span>
+          <button className="btn ghost small" onClick={() => { clearToken(); setLocked(true); }}>Lock console</button>
         </div>
       </header>
 
@@ -69,6 +74,50 @@ export default function App() {
       {tab === 'approvals' && <Approvals approvals={approvals} onDone={refresh} />}
       {tab === 'activity' && <Activity audit={audit} seal={seal} />}
       {tab === 'safety' && <Safety system={system} agents={agents} orders={orders} onDone={refresh} />}
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------- unlock */
+
+function Unlock({ onUnlocked }: { onUnlocked: () => void }) {
+  const [value, setValue] = useState('');
+  const [tried, setTried] = useState(false);
+
+  function submit() {
+    setToken(value);
+    setTried(true);
+    onUnlocked();
+  }
+
+  return (
+    <div className="shell">
+      <header className="masthead">
+        <div className="brand">
+          <h1>Kirana<span>.</span></h1>
+          <p>Any shop, ready for AI shoppers — and every rupee they spend, watched.</p>
+        </div>
+      </header>
+      <section className="card hi" style={{ marginTop: 28, maxWidth: 620 }}>
+        <h2>Unlock the console</h2>
+        <p className="sub">
+          This console can approve spending, pause every AI assistant and read the full record,
+          so it is locked. Your token is printed in the server log when it starts.
+        </p>
+        <div className="row">
+          <input
+            type="text" placeholder="paste the console token" value={value} autoFocus
+            onChange={(e) => { setValue(e.target.value); setTried(false); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && value.trim()) submit(); }}
+          />
+          <button className="btn" disabled={!value.trim()} onClick={submit}>Unlock</button>
+        </div>
+        {tried && <div className="banner err" style={{ marginTop: 16 }}>That token was not accepted. Check the server log for the current one.</div>}
+        <p className="faint" style={{ fontSize: 13, marginTop: 16, marginBottom: 0 }}>
+          Set <code className="mono">KIRANA_CONSOLE_TOKEN</code> in <code className="mono">.env</code> to keep the same
+          token across restarts. Anyone holding it can approve spending, so treat it like a password.
+        </p>
+      </section>
     </div>
   );
 }
