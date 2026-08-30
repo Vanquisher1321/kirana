@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, type Merchant, type Order } from '../api.ts';
-import { Card, Empty, Kpi, PageHead, Pill, statusTone, statusWord } from '../ui.tsx';
+import { Card, Empty, Kpi, Load, PageHead, Pill, Skeleton, statusTone, statusWord } from '../ui.tsx';
 import { describe, timeAgo } from '../plain.ts';
 import type { PersonaProps } from '../App.tsx';
 
@@ -10,7 +10,7 @@ export default function MerchantView({ data, page, refresh, onBlocked }: Persona
   const shop = data.merchants[0];
 
   if (page === 'catalogue') return <Catalogue shop={shop} />;
-  if (page === 'orders') return <Orders orders={data.orders} />;
+  if (page === 'orders') return <Orders orders={data.orders} loaded={data.loaded} />;
   if (page === 'assistants') return <Assistants data={data} onBlocked={onBlocked} refresh={refresh} />;
   if (page === 'record') return <Record data={data} />;
   return <Overview shop={shop} data={data} refresh={refresh} onBlocked={onBlocked} />;
@@ -118,16 +118,16 @@ function Catalogue({ shop }: { shop?: Merchant }) {
   );
 }
 
-function Orders({ orders }: { orders: Order[] }) {
+function Orders({ orders, loaded }: { orders: Order[]; loaded: boolean }) {
   return (
     <>
       <PageHead title="Orders" sub="What AI assistants tried to buy, and how each one ended." />
       <Card>
-        {orders.length === 0 ? <Empty>No AI orders yet.</Empty> : (
+        <Load loaded={loaded} items={orders} rows={4} empty="No AI orders yet.">{(rows) => (
           <table>
             <thead><tr><th>Order</th><th>Amount</th><th>Status</th><th>Razorpay</th><th>When</th></tr></thead>
             <tbody>
-              {orders.map((o) => (
+              {rows.map((o) => (
                 <tr key={o.id}>
                   <td className="mono" style={{ fontSize: 12 }}>{o.id}</td>
                   <td className="num" style={{ fontWeight: 600 }}>{o.amount}</td>
@@ -141,7 +141,7 @@ function Orders({ orders }: { orders: Order[] }) {
               ))}
             </tbody>
           </table>
-        )}
+        )}</Load>
       </Card>
     </>
   );
@@ -172,11 +172,11 @@ function Assistants({ data, onBlocked, refresh }: Pick<PersonaProps, 'data' | 'o
       )}
 
       <Card>
-        {data.agents.length === 0 ? <Empty>No AI assistant has visited yet.</Empty> : (
+        <Load loaded={data.loaded} items={data.agents} rows={3} empty="No AI assistant has visited yet.">{(rows) => (
           <table>
             <thead><tr><th>Assistant</th><th>Identity</th><th>Per order</th><th>Per day</th><th /></tr></thead>
             <tbody>
-              {data.agents.map((a) => (
+              {rows.map((a) => (
                 <tr key={a.id}>
                   <td style={{ fontWeight: 600 }}>{a.label}<div className="tiny">first seen {timeAgo(a.createdAt)}</div></td>
                   <td>
@@ -200,7 +200,7 @@ function Assistants({ data, onBlocked, refresh }: Pick<PersonaProps, 'data' | 'o
               ))}
             </tbody>
           </table>
-        )}
+        )}</Load>
         <div className="banner warn" style={{ marginTop: 16 }}>
           An assistant that only tells you its name can’t have its limit raised — anyone could claim the same name. Issue it a key first.
         </div>
@@ -222,7 +222,7 @@ function Record({ data }: Pick<PersonaProps, 'data'>) {
         </div>
       )}
       <Card>
-        {data.audit.length === 0 ? <Empty>Nothing has happened yet.</Empty> : data.audit.map((row) => {
+        {!data.loaded ? <Skeleton rows={5} /> : data.audit.length === 0 ? <Empty>Nothing has happened yet.</Empty> : data.audit.map((row) => {
           const p = describe(row);
           return (
             <div key={row.seq} style={{ display: 'grid', gridTemplateColumns: '80px minmax(0,1fr)', gap: 14, padding: '12px 0', borderTop: '1px solid var(--line-2)' }}>

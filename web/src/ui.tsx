@@ -54,6 +54,32 @@ export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
 }
 
+/**
+ * Loading and empty are different states.
+ *
+ * Rendering "No orders yet" before the first fetch returns tells someone their
+ * data is missing when we simply have not looked. Skeleton rows hold the shape
+ * instead, so nothing claims to be empty until it is known to be.
+ */
+export function Skeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div aria-hidden style={{ display: 'grid', gap: 10 }}>
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="skel" style={{ width: `${100 - i * 12}%` }} />
+      ))}
+    </div>
+  );
+}
+
+/** Renders a skeleton until loaded, an empty state when there is nothing. */
+export function Load<T>({ loaded, items, empty, children, rows }: {
+  loaded: boolean; items: T[]; empty: ReactNode; rows?: number; children: (items: T[]) => ReactNode;
+}) {
+  if (!loaded) return <Skeleton rows={rows} />;
+  if (items.length === 0) return <Empty>{empty}</Empty>;
+  return <>{children(items)}</>;
+}
+
 /** Status word -> tone, in one place so the three dashboards agree. */
 export function statusTone(status: string): Tone {
   if (status === 'paid' || status === 'granted' || status === 'ok') return 'ok';

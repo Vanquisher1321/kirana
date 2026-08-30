@@ -10,6 +10,7 @@ import Platform from './personas/Platform.tsx';
 export type Persona = 'merchant' | 'shopper' | 'platform';
 
 export interface Data {
+  loaded: boolean;
   merchants: Merchant[];
   approvals: Approval[];
   audit: AuditRow[];
@@ -46,7 +47,7 @@ const FIRST: Record<Persona, string> = { merchant: 'overview', shopper: 'home', 
 export default function App() {
   const [persona, setPersona] = useState<Persona>('merchant');
   const [page, setPage] = useState('overview');
-  const [data, setData] = useState<Data>({ merchants: [], approvals: [], audit: [], orders: [], agents: [], system: null, seal: null });
+  const [data, setData] = useState<Data>({ loaded: false, merchants: [], approvals: [], audit: [], orders: [], agents: [], system: null, seal: null });
   const [locked, setLocked] = useState(false);
   const [needToken, setNeedToken] = useState(false);
   const [err, setErr] = useState('');
@@ -56,7 +57,7 @@ export default function App() {
       const [merchants, approvals, audit, orders, agents, system, seal] = await Promise.all([
         api.merchants(), api.approvals(), api.audit(), api.orders(), api.agents(), api.system(), api.verify(),
       ]);
-      setData({ merchants, approvals, audit, orders, agents, system, seal });
+      setData({ loaded: true, merchants, approvals, audit, orders, agents, system, seal });
       setErr(''); setLocked(false);
     } catch (e) {
       if (e instanceof Unauthorized) setLocked(true);

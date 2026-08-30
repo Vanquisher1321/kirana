@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api.ts';
-import { Card, Empty, PageHead, Pill, statusTone, statusWord } from '../ui.tsx';
+import { Card, Empty, Load, PageHead, Pill, Skeleton, statusTone, statusWord } from '../ui.tsx';
 import { describe, timeAgo, countdown } from '../plain.ts';
 import type { PersonaProps } from '../App.tsx';
 
@@ -74,7 +74,7 @@ function Home({ data, refresh, onBlocked }: Pick<PersonaProps, 'data' | 'refresh
         </div>
       </div>
 
-      {data.approvals.length === 0 ? (
+      {!data.loaded ? <Card><Skeleton rows={3} /></Card> : data.approvals.length === 0 ? (
         <Card>
           <Empty>
             Nothing is waiting for you.<br />
@@ -82,7 +82,7 @@ function Home({ data, refresh, onBlocked }: Pick<PersonaProps, 'data' | 'refresh
           </Empty>
         </Card>
       ) : data.approvals.map((a) => (
-        <div className="card" key={a.id} style={{ borderColor: 'var(--accent)', marginBottom: 16 }}>
+        <div className="card enter" key={a.id} style={{ borderColor: 'var(--accent)', marginBottom: 16 }}>
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <div className="h2">Your assistant is asking to spend</div>
             <Pill tone="warn">Awaiting your approval</Pill>
@@ -136,7 +136,7 @@ function Activity({ data }: Pick<PersonaProps, 'data'>) {
     <>
       <PageHead title="Activity" sub="Everything your assistant did, in order. Nothing happens without a record." />
       <Card>
-        {data.audit.length === 0 ? <Empty>Nothing yet.</Empty> : data.audit.map((row, i) => {
+        {!data.loaded ? <Skeleton rows={5} /> : data.audit.length === 0 ? <Empty>Nothing yet.</Empty> : data.audit.map((row, i) => {
           const p = describe(row);
           const tone = row.outcome === 'ok' ? 'var(--ok)' : row.outcome === 'blocked' ? 'var(--warn)' : 'var(--bad)';
           return (
@@ -175,11 +175,11 @@ function Limits({ data }: Pick<PersonaProps, 'data'>) {
       </Card>
 
       <Card title="Orders" sub="Everything your assistant has bought or tried to buy.">
-        {data.orders.length === 0 ? <Empty>No orders yet.</Empty> : (
+        <Load loaded={data.loaded} items={data.orders} rows={3} empty="No orders yet.">{(rows) => (
           <table>
             <thead><tr><th>Amount</th><th>Status</th><th>When</th></tr></thead>
             <tbody>
-              {data.orders.map((o) => (
+              {rows.map((o) => (
                 <tr key={o.id}>
                   <td className="num" style={{ fontWeight: 600 }}>{o.amount}</td>
                   <td><Pill tone={statusTone(o.status)}>{statusWord(o.status)}</Pill></td>
@@ -188,7 +188,7 @@ function Limits({ data }: Pick<PersonaProps, 'data'>) {
               ))}
             </tbody>
           </table>
-        )}
+        )}</Load>
       </Card>
     </>
   );

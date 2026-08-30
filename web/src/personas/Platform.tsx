@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api.ts';
-import { Card, Empty, Kpi, PageHead, Pill, statusTone, statusWord } from '../ui.tsx';
+import { Card, Empty, Kpi, Load, PageHead, Pill, Skeleton, statusTone, statusWord } from '../ui.tsx';
 import { GATE_PLAIN, timeAgo } from '../plain.ts';
 import type { PersonaProps } from '../App.tsx';
 
@@ -47,7 +47,7 @@ function Overview({ data }: Pick<PersonaProps, 'data'>) {
       </div>
 
       <Card title="Why payments were stopped" sub="Each of these is a charge that did not happen. The reason matters more than the count.">
-        {reasons.length === 0 ? <Empty>No payment has been refused yet.</Empty> : (
+        {!data.loaded ? <Skeleton rows={4} /> : reasons.length === 0 ? <Empty>No payment has been refused yet.</Empty> : (
           <div style={{ display: 'grid', gap: 15 }}>
             {reasons.map(([gate, n]) => (
               <div key={gate}>
@@ -82,11 +82,11 @@ function Merchants({ data }: Pick<PersonaProps, 'data'>) {
     <>
       <PageHead title="Merchants" sub="Shops reachable by AI buyers. None of them wrote a line of code." />
       <Card>
-        {data.merchants.length === 0 ? <Empty>No merchants onboarded yet.</Empty> : (
+        <Load loaded={data.loaded} items={data.merchants} rows={3} empty="No merchants onboarded yet.">{(rows) => (
           <table>
             <thead><tr><th>Merchant</th><th>Products</th><th>Options</th><th>Source</th><th>Read in</th><th>Last read</th></tr></thead>
             <tbody>
-              {data.merchants.map((m) => (
+              {rows.map((m) => (
                 <tr key={m.id}>
                   <td style={{ fontWeight: 600 }}>{m.name}<div className="tiny mono">{m.slug}</div></td>
                   <td className="num">{m.products}</td>
@@ -98,7 +98,7 @@ function Merchants({ data }: Pick<PersonaProps, 'data'>) {
               ))}
             </tbody>
           </table>
-        )}
+        )}</Load>
       </Card>
     </>
   );
@@ -109,11 +109,11 @@ function Transactions({ data }: Pick<PersonaProps, 'data'>) {
     <>
       <PageHead title="Transactions" sub="Every AI order across the platform." />
       <Card>
-        {data.orders.length === 0 ? <Empty>No transactions yet.</Empty> : (
+        <Load loaded={data.loaded} items={data.orders} rows={3} empty="No transactions yet.">{(rows) => (
           <table>
             <thead><tr><th>Order</th><th>Assistant</th><th>Amount</th><th>Status</th><th>When</th></tr></thead>
             <tbody>
-              {data.orders.map((o) => (
+              {rows.map((o) => (
                 <tr key={o.id}>
                   <td className="mono" style={{ fontSize: 12 }}>{o.id}</td>
                   <td className="dim">{o.agentId ?? 'unregistered'}</td>
@@ -124,7 +124,7 @@ function Transactions({ data }: Pick<PersonaProps, 'data'>) {
               ))}
             </tbody>
           </table>
-        )}
+        )}</Load>
       </Card>
     </>
   );
@@ -141,11 +141,11 @@ function Assistants({ data }: Pick<PersonaProps, 'data'>) {
         <Kpi label="Unverified" value={`${pct}%`} sub="pinned to the low default ceiling" />
       </div>
       <Card>
-        {data.agents.length === 0 ? <Empty>No assistant has visited yet.</Empty> : (
+        <Load loaded={data.loaded} items={data.agents} rows={3} empty="No assistant has visited yet.">{(rows) => (
           <table>
             <thead><tr><th>Assistant</th><th>Identity</th><th>Per order</th><th>Per day</th><th>First seen</th></tr></thead>
             <tbody>
-              {data.agents.map((a) => (
+              {rows.map((a) => (
                 <tr key={a.id}>
                   <td style={{ fontWeight: 600 }}>{a.label}</td>
                   <td>{a.verified ? <Pill tone="ok">Verified</Pill> : <Pill tone="warn">Name only</Pill>}</td>
@@ -156,7 +156,7 @@ function Assistants({ data }: Pick<PersonaProps, 'data'>) {
               ))}
             </tbody>
           </table>
-        )}
+        )}</Load>
       </Card>
     </>
   );

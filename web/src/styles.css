@@ -92,7 +92,7 @@ input, select { font: inherit; }
 .brandsub { font-size: 11px; color: var(--faint); padding-left: 10px; border-left: 1px solid var(--topbar-line); }
 
 .personas { display: flex; gap: 2px; padding: 3px; background: #111827; border: 1px solid #1F2937; border-radius: 9px; }
-.persona { padding: 6px 14px; border-radius: 7px; font-size: 12px; font-weight: 600; color: #9CA3AF; transition: background .14s, color .14s, transform .1s var(--ease-out); }
+.persona { padding: 6px 14px; border-radius: 7px; font-size: 12px; font-weight: 600; color: #9CA3AF; transition: background .14s, color .14s, transform .16s var(--ease-out); }
 .persona:hover { color: #E5E7EB; }
 .persona:active { transform: scale(.97); }
 .persona[aria-selected="true"] { background: #F9FAFB; color: #0B1020; }
@@ -117,7 +117,7 @@ input, select { font: inherit; }
 .navitem {
   display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
   padding: 8px 10px; border-radius: 8px; font-size: 13px; font-weight: 500;
-  color: var(--ink-2); transition: background .12s, color .12s, transform .1s var(--ease-out);
+  color: var(--ink-2); transition: background .12s, color .12s, transform .16s var(--ease-out);
 }
 .navitem:hover { background: var(--line-3); }
 .navitem:active { transform: scale(.985); }
@@ -162,7 +162,7 @@ input, select { font: inherit; }
 .kpi .s { font-size: 12px; color: var(--faint); margin-top: 4px; }
 .delta { font-size: 11.5px; font-weight: 600; color: var(--ok-deep); background: var(--ok-bg); border: 1px solid var(--ok-line); padding: 1px 7px; border-radius: 20px; margin-left: 8px; }
 
-.btn { font-size: 13px; font-weight: 600; color: #fff; background: var(--accent); border-radius: 9px; padding: 9px 16px; transition: background .14s, transform .1s var(--ease-out); }
+.btn { font-size: 13px; font-weight: 600; color: #fff; background: var(--accent); border-radius: 9px; padding: 9px 16px; transition: background .14s, transform .16s var(--ease-out); }
 .btn:hover:not(:disabled) { background: var(--accent-deep); }
 .btn:active:not(:disabled) { transform: scale(.97); }
 .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
@@ -220,3 +220,26 @@ tr:hover td { background: var(--card-2); }
     transition-duration: .001ms !important;
   }
 }
+
+/* Skeletons. A slow, low-contrast sweep — this is a waiting state, not an
+   event, so it must not compete with content that is about to arrive. */
+.skel {
+  height: 14px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--line-3) 25%, var(--line-2) 37%, var(--line-3) 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+
+/* The approval card is the product's one important moment and appears
+   occasionally, so it earns a real entrance. Never from scale(0) — nothing in
+   the world appears out of nothing — so it starts at 0.98 with opacity. */
+.enter { animation: enterCard .22s var(--ease-out) both; }
+@keyframes enterCard {
+  from { opacity: 0; transform: scale(.98) translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Rows that lead somewhere should say so on hover. */
+tbody tr { transition: background .12s; }
