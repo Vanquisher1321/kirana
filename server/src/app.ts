@@ -1,5 +1,4 @@
 import Fastify from 'fastify';
-import fastifyStatic from '@fastify/static';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { config } from './lib/config.ts';
 import { ingestStorefront, IngestError } from './catalog/ingest.ts';
@@ -14,9 +13,9 @@ import { listAgents, setAgentCaps } from './checkout/agents.ts';
 import { KILL_SWITCH, engageKillSwitch, releaseKillSwitch } from './checkout/guard.ts';
 import { circuitState } from './razorpay/client.ts';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadBundle, lookup } from './lib/staticfiles.ts';
 
 export function buildApp() {
     const app = Fastify({
@@ -282,21 +281,30 @@ export function buildApp() {
   // -------------------------------------------------------------------------
 
   const webDist = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist');
-  if (existsSync(join(webDist, 'index.html'))) {
-    void app.register(fastifyStatic, { root: webDist, prefix: '/' });
-    // The approval link handed to buyer agents, and any client-side route,
-    // resolve to the single-page app rather than a 404.
+  const bundle = loadBundle(webDist);
+
+  if (bundle.index) {
+    app.log.info(`console bundle       ${bundle.count} files, ${(bundle.bytes / 1024).toFixed(0)} KB, served from memory`);
     app.setNotFoundHandler((request, reply) => {
       if (request.url.startsWith('/api') || request.url.startsWith('/mcp') || request.url.startsWith('/webhooks')) {
         return reply.code(404).send({ error: 'not found' });
       }
-      return reply.sendFile('index.html');
+      const asset = lookup(bundle, request.url) ?? bundle.index!;
+      return reply
+        .type(asset.contentType)
+        .header('cache-control', asset.immutable ? 'public, max-age=31536000, immutable' : 'no-cache')
+        .send(asset.body);
     });
   } else {
-    app.get('/', async () => ({
-      service: 'kirana',
-      note: 'Console not built yet. Run `npm run build:web` from the repo root, or `npm run dev` inside web/ for live reload on port 5173.',
-    }));
+    app.setNotFoundHandler((request, reply) => {
+      if (request.url.startsWith('/api') || request.url.startsWith('/mcp') || request.url.startsWith('/webhooks')) {
+        return reply.code(404).send({ error: 'not found' });
+      }
+      return reply.code(404).send({
+        service: 'kirana',
+        note: 'Console not built yet. Run `npm run build:web` from the repo root, or `npm run dev:web` for live reload on port 5173.',
+      });
+    });
   }
 
   return app;
