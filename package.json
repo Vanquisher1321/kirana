@@ -4,12 +4,16 @@
   "private": true,
   "description": "Make any merchant transactable by an AI buyer. Storefront -> agent-readable catalog -> MCP server -> gated agentic checkout on Razorpay.",
   "scripts": {
+    "start": "node scripts/launch.mjs",
+    "start:tunnel": "node scripts/launch.mjs --tunnel",
+    "rebuild": "node scripts/launch.mjs --rebuild",
     "install:all": "npm --prefix server install && npm --prefix web install",
     "dev": "npm --prefix server run dev",
     "dev:web": "npm --prefix web run dev",
     "build:web": "npm --prefix web run build",
     "seed": "npm --prefix server run seed",
-    "test": "npm --prefix server test",
-    "start": "npm --prefix server start"
+    "probe": "npm --prefix server run probe",
+    "agent": "npm --prefix server run agent --",
+    "test": "npm --prefix server test"
   }
 }
