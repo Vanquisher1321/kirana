@@ -61,10 +61,20 @@ export function buildApp() {
     if (url.startsWith('/api/')) {
       const header = String(request.headers.authorization ?? '');
       const presented = header.startsWith('Bearer ') ? header.slice(7) : String(request.headers['x-kirana-console'] ?? '');
-      if (!secretEquals(presented, config.consoleToken)) {
-        return reply.code(401).send({ error: 'unauthorized', message: 'A console token is required. It is printed in the server log at startup.' });
-      }
-      return;
+      if (secretEquals(presented, config.consoleToken)) return;
+
+      // Public demo: reading is open, acting is not. GET is the whole
+      // distinction -- every endpoint that spends, approves, ingests, pauses
+      // or issues a key is a POST.
+      if (config.publicReadonly && request.method === 'GET') return;
+
+      return reply.code(401).send({
+        error: 'unauthorized',
+        message: config.publicReadonly
+          ? 'You can watch this demo, but approving, ingesting and pausing need the operator token.'
+          : 'A console token is required. It is printed in the server log at startup.',
+        readOnly: config.publicReadonly,
+      });
     }
 
     if (url.startsWith('/mcp/')) {
@@ -263,6 +273,7 @@ export function buildApp() {
   app.post('/api/reconcile', async () => reconcile({ minAgeMs: 0 }));
 
   app.get('/api/system', async () => ({
+    publicReadonly: config.publicReadonly,
     killSwitch: { engaged: KILL_SWITCH.engaged, reason: KILL_SWITCH.reason },
     gateway: circuitState(),
     razorpay: { configured: config.razorpay.configured, mode: 'test' },

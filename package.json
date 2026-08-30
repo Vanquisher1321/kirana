@@ -14,6 +14,7 @@
     "seed": "npm --prefix server run seed",
     "probe": "npm --prefix server run probe",
     "agent": "npm --prefix server run agent --",
-    "test": "npm --prefix server test"
+    "test": "npm --prefix server test",
+    "build:deploy": "npm --prefix server install --omit=dev && npm --prefix web install && npm --prefix web run build"
   }
 }

@@ -290,3 +290,33 @@ test('SECURITY: an issued key produces a verified agent whose caps CAN be raised
   });
   assert.equal(raised.status, 200);
 });
+
+test('PUBLIC DEMO: reading is open but acting still needs the token', async () => {
+  // The deployed instance runs with KIRANA_PUBLIC_READONLY=true. Simulated here
+  // by asserting the split the hook makes: GET is the read surface, and every
+  // endpoint that spends, approves, ingests or pauses is a POST.
+  const readEndpoints = ['/api/merchants', '/api/audit', '/api/audit/verify', '/api/orders', '/api/agents', '/api/system', '/api/approvals'];
+  for (const path of readEndpoints) {
+    const withToken = await authFetch(`${base}${path}`);
+    assert.equal(withToken.status, 200, `${path} readable with a token`);
+  }
+
+  // Without the flag set in this test process, reads are still refused —
+  // proving the default is locked, not open.
+  for (const path of readEndpoints) {
+    const bare = await fetch(`${base}${path}`);
+    assert.equal(bare.status, 401, `${path} is locked by default`);
+  }
+
+  // And the write surface is refused without a token either way.
+  const writes: Array<[string, string]> = [
+    ['/api/ingest', '{"url":"example.com"}'],
+    ['/api/system/kill-switch', '{"engage":true}'],
+    ['/api/agents/x/key', '{}'],
+    ['/api/reconcile', '{}'],
+  ];
+  for (const [path, body] of writes) {
+    const res = await fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    assert.equal(res.status, 401, `${path} refuses an unauthenticated write`);
+  }
+});

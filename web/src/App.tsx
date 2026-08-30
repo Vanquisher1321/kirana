@@ -14,7 +14,8 @@ export default function App() {
   const [system, setSystem] = useState<SystemState | null>(null);
   const [seal, setSeal] = useState<Verification | null>(null);
   const [err, setErr] = useState('');
-  const [locked, setLocked] = useState(!getToken());
+  const [locked, setLocked] = useState(false);
+  const [needToken, setNeedToken] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -35,7 +36,9 @@ export default function App() {
     return () => clearInterval(t);
   }, [refresh]);
 
-  if (locked) return <Unlock onUnlocked={() => void refresh()} />;
+  if (locked) return <Unlock onUnlocked={() => { setLocked(false); void refresh(); }} />;
+
+  const watching = Boolean(system?.publicReadonly) && !getToken();
 
   return (
     <div className="shell">
@@ -57,7 +60,7 @@ export default function App() {
             <i className={`dot ${system?.killSwitch.engaged ? 'bad' : 'good'}`} />
             {system?.killSwitch.engaged ? 'AI spending PAUSED' : 'AI spending allowed'}
           </span>
-          <button className="btn ghost small" onClick={() => { clearToken(); setLocked(true); }}>Lock console</button>
+          {!watching && <button className="btn ghost small" onClick={() => { clearToken(); setLocked(true); }}>Lock console</button>}
         </div>
       </header>
 
@@ -68,10 +71,36 @@ export default function App() {
         <button className="tab" role="tab" aria-selected={tab === 'safety'} onClick={() => setTab('safety')}>Safety</button>
       </nav>
 
+      {watching && !needToken && (
+        <div className="banner" style={{ background: '#191510', border: '1px solid #8a6a2b', color: '#e8d5b0' }}>
+          You are watching a live demo. Browsing, the record and the orders are all real —
+          approving, connecting a shop and pausing need the operator's token.
+          <button className="btn ghost small" style={{ marginLeft: 12 }} onClick={() => setNeedToken(true)}>I have the token</button>
+        </div>
+      )}
+
+      {needToken && (
+        <div className="card hi">
+          <h2>That action needs the operator's token</h2>
+          <p className="sub">Reading is open on this demo. Anything that spends money or changes the system is not.</p>
+          <div className="row">
+            <input type="text" placeholder="paste the console token" autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  setToken((e.target as HTMLInputElement).value);
+                  setNeedToken(false);
+                  void refresh();
+                }
+              }} />
+            <button className="btn ghost" onClick={() => setNeedToken(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       {err && <div className="banner err">{err}</div>}
 
       {tab === 'shops' && <Shops merchants={merchants} onDone={refresh} />}
-      {tab === 'approvals' && <Approvals approvals={approvals} onDone={refresh} />}
+      {tab === 'approvals' && <Approvals approvals={approvals} onDone={refresh} onBlocked={() => setNeedToken(true)} />}
       {tab === 'activity' && <Activity audit={audit} seal={seal} />}
       {tab === 'safety' && <Safety system={system} agents={agents} orders={orders} onDone={refresh} />}
     </div>
@@ -209,13 +238,17 @@ function Shops({ merchants, onDone }: { merchants: Merchant[]; onDone: () => Pro
 
 /* -------------------------------------------------------------- approvals */
 
-function Approvals({ approvals, onDone }: { approvals: Approval[]; onDone: () => Promise<void> }) {
+function Approvals({ approvals, onDone, onBlocked }: { approvals: Approval[]; onDone: () => Promise<void>; onBlocked: (m: string) => void }) {
   const [busy, setBusy] = useState('');
 
   async function act(id: string, yes: boolean) {
     setBusy(id);
-    try { yes ? await api.approve(id) : await api.reject(id); await onDone(); }
-    finally { setBusy(''); }
+    try {
+      yes ? await api.approve(id) : await api.reject(id);
+      await onDone();
+    } catch (e) {
+      onBlocked((e as Error).message);
+    } finally { setBusy(''); }
   }
 
   if (approvals.length === 0) {

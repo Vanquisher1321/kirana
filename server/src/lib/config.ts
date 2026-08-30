@@ -65,8 +65,20 @@ if (!signingSecret) {
   signingIsEphemeral = true;
 }
 
+/**
+ * On a public demo instance, READING is open and ACTING is not.
+ *
+ * A locked-out judge sees nothing, and a wide-open console lets a stranger
+ * approve spending. Splitting on the verb gives both: anyone can watch the
+ * catalogue, the orders and the audit trail live; approving, ingesting,
+ * pausing or issuing keys still needs the operator's token. Off by default --
+ * a local instance stays fully locked.
+ */
+const publicReadonly = opt('KIRANA_PUBLIC_READONLY', 'false') === 'true';
+
 export const config = {
   port: Number(opt('PORT', '3000')),
+  publicReadonly,
   publicOrigin: opt('PUBLIC_ORIGIN').replace(/\/+$/, ''),
   dbPath: opt('KIRANA_DB', 'data/kirana.db'),
   signingSecret,
@@ -92,6 +104,7 @@ export function describeConfig(): string[] {
   lines.push(`razorpay            ${config.razorpay.configured ? `configured (${config.razorpay.keyId.slice(0, 16)}…, TEST mode)` : 'NOT configured — checkout disabled'}`);
   lines.push(`razorpay webhooks   ${config.razorpay.webhookSecret ? 'secret present' : 'no secret — webhook verification disabled'}`);
   lines.push(`quote signing       ${config.signingIsEphemeral ? 'EPHEMERAL (set KIRANA_SIGNING_SECRET to persist across restarts)' : 'persistent secret'}`);
+  lines.push(`console access      ${config.publicReadonly ? 'PUBLIC READ-ONLY (actions still need the token)' : 'token required for everything'}`);
   lines.push(`llm provider        ${config.llm.provider}${config.llm.provider === 'none' ? ' (structured-feed ingestion only)' : ''}`);
   if (config.publicOrigin && !config.razorpay.webhookSecret) {
     lines.push('WARNING             publicly reachable with no webhook secret — webhooks will be refused');

@@ -22,6 +22,7 @@ export interface Agent {
   id: string; label: string; perOrderCap: string; dailyCap: string; active: boolean; createdAt: string;
 }
 export interface SystemState {
+  publicReadonly: boolean;
   killSwitch: { engaged: boolean; reason: string };
   gateway: { open: boolean; failures: number; openUntil: string | null };
   razorpay: { configured: boolean; mode: string };

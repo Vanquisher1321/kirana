@@ -27,7 +27,17 @@ const fixtureFetch: FetchLike = async (url) => {
   });
 };
 
-const report = await ingestStorefront('bluehill.example', { fetchImpl: fixtureFetch });
+export async function seedDemoStore() {
+  return ingestStorefront('bluehill.example', { fetchImpl: fixtureFetch });
+}
+
+/** Only runs when invoked directly, so importing this module is side-effect free. */
+const invokedDirectly = process.argv[1]?.endsWith('seed.ts') ?? false;
+if (!invokedDirectly) {
+  // imported for seedDemoStore() only
+} else {
+await (async () => {
+const report = await seedDemoStore();
 console.log(`Seeded ${report.merchant ?? ''}`.trim());
 console.log(`  merchant     ${report.merchantId}`);
 console.log(`  adapter      ${report.adapter} (llm: ${report.usedLlm})`);
@@ -36,3 +46,5 @@ console.log(`  variants     ${report.variantCount}`);
 console.log(`  warnings     ${report.warnings.length}`);
 for (const w of report.warnings) console.log(`    - ${w}`);
 console.log(`  mcp endpoint /mcp/bluehill-example`);
+})();
+}

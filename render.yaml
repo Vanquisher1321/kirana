@@ -1,0 +1,41 @@
+# Render blueprint — https://render.com/docs/blueprint-spec
+#
+# One free web service. No database service and no disk, deliberately:
+# Render's free tier offers no persistent disk, and moving this project to
+# Postgres would mean making every database call async across every module —
+# a large refactor to satisfy a demo host. Instead the server re-seeds a demo
+# shop whenever it boots into an empty database, so the public link is always
+# live. Orders placed by a visitor are lost when the instance sleeps (15
+# minutes idle, ~1 minute to wake). That trade is stated in the README.
+
+services:
+  - type: web
+    name: kirana
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm run build:deploy
+    startCommand: npm --prefix server run start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.18.0
+      # Reading is open so anyone can watch the demo; approving, ingesting,
+      # pausing and key issuance still require KIRANA_CONSOLE_TOKEN.
+      - key: KIRANA_PUBLIC_READONLY
+        value: "true"
+      - key: KIRANA_DB
+        value: /tmp/kirana.db
+      # Set these in the Render dashboard, never in this file.
+      - key: KIRANA_CONSOLE_TOKEN
+        sync: false
+      - key: KIRANA_SIGNING_SECRET
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: PUBLIC_ORIGIN
+        sync: false
