@@ -14,12 +14,13 @@ export interface AuditRow {
   outcome: 'ok' | 'blocked' | 'failed'; detail: Record<string, unknown>; hash: string;
 }
 export interface Order {
-  id: string; status: string; amount: string; currency: string;
+  id: string; status: string; amount: string; amountMinor: number; currency: string;
   razorpayOrderId: string | null; razorpayPaymentId: string | null;
   failureReason: string | null; agentId: string | null; createdAt: string;
 }
 export interface Agent {
-  id: string; label: string; perOrderCap: string; dailyCap: string; active: boolean; createdAt: string;
+  id: string; label: string; perOrderCap: string; dailyCap: string;
+  active: boolean; verified: boolean; createdAt: string;
 }
 export interface SystemState {
   publicReadonly: boolean;
@@ -78,6 +79,10 @@ export const api = {
   orders: () => req<Order[]>('/api/orders'),
   agents: () => req<Agent[]>('/api/agents'),
   system: () => req<SystemState>('/api/system'),
+  issueKey: (agentId: string, label?: string) =>
+    req<{ apiKey: string; agent: Agent; note: string }>(`/api/agents/${agentId}/key`, {
+      method: 'POST', body: JSON.stringify({ label }),
+    }),
   killSwitch: (engage: boolean, reason?: string) =>
     req<{ engaged: boolean; reason: string }>('/api/system/kill-switch', { method: 'POST', body: JSON.stringify({ engage, reason }) }),
 };
