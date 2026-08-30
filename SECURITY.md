@@ -4,11 +4,26 @@ Kirana lets a program spend a person's money. This document states what it
 defends against, how, and — just as importantly — what it does not defend
 against yet.
 
+## Two modes, and which one you are reading about
+
+`KIRANA_ACCESS` selects between them, defaulting to `demo` on plain localhost
+and `locked` as soon as `PUBLIC_ORIGIN` is set — a console does not become
+internet-facing and open by accident.
+
+- **`locked`** is what this document describes: reading is open so the console
+  stays legible, and every action that spends, approves, connects a shop,
+  pauses the system or issues a key requires the operator's token.
+- **`demo`** is the public sandbox. Nothing is gated, on purpose. It runs on
+  Razorpay **test** credentials, the server refuses to boot on a live key, no
+  real money can move, and every spend is still bounded by the same thirteen
+  guards and the same ₹2,000 per-order ceiling. A sandbox nobody can drive is
+  not a demonstration of anything.
+
 ## The two surfaces, and why they have opposite rules
 
 | Surface | Who calls it | Protection |
 |---|---|---|
-| `/api/*` | the human console | **Bearer token required.** It can approve spending, pause the system, and read the audit trail. |
+| `/api/*` | the human console | **Bearer token required to act** (in `locked` mode). Reading is open; approving, pausing, connecting and key issuance are not. |
 | `/mcp/*` | buyer agents | **Open by design**, protected by caps, consent and rate limits. |
 
 The common mistake is the reverse: authenticate the agent and leave the approve
