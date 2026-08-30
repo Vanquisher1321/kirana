@@ -10,7 +10,7 @@ import type { PersonaProps } from '../App.tsx';
  * paid, it is what was stopped and why.
  */
 export default function PlatformView({ data, page, refresh, onBlocked }: PersonaProps) {
-  if (page === 'merchants') return <Merchants data={data} />;
+  if (page === 'merchants') return <Merchants data={data} refresh={refresh} onBlocked={onBlocked} />;
   if (page === 'transactions') return <Transactions data={data} />;
   if (page === 'assistants') return <Assistants data={data} />;
   if (page === 'risk') return <Risk data={data} refresh={refresh} onBlocked={onBlocked} />;
@@ -77,10 +77,45 @@ function Overview({ data }: Pick<PersonaProps, 'data'>) {
   );
 }
 
-function Merchants({ data }: Pick<PersonaProps, 'data'>) {
+function Merchants({ data, refresh, onBlocked }: Pick<PersonaProps, 'data' | 'refresh' | 'onBlocked'>) {
+  const [url, setUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const [problem, setProblem] = useState('');
+
+  // Onboarding merchants at scale is the platform's job, not something a shop
+  // owner does from inside their own dashboard.
+  async function onboard() {
+    setBusy(true); setNote(''); setProblem('');
+    try {
+      const r = await api.ingest(url);
+      setNote(`${r.merchant.name} is now reachable by AI buyers — ${r.productCount} products, ${r.variantCount} buying options, read in ${r.durationMs}ms. ${r.usedLlm ? 'Some details were interpreted by a model.' : 'Read from the shop’s own feed; no model guessed at a price.'}`);
+      setUrl('');
+      await refresh();
+    } catch (e) {
+      if ((e as Error).name === 'Unauthorized') onBlocked();
+      else setProblem((e as Error).message);
+    } finally { setBusy(false); }
+  }
+
   return (
     <>
       <PageHead title="Merchants" sub="Shops reachable by AI buyers. None of them wrote a line of code." />
+
+      <Card title="Onboard a merchant" sub="Paste a storefront. No integration, no plugin, no cooperation needed from the merchant.">
+        <div className="row">
+          <input className="field" type="text" placeholder="bluetokaicoffee.com" value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && url && !busy) void onboard(); }} />
+          <button className="btn" disabled={!url || busy} onClick={() => void onboard()}>
+            {busy ? <><span className="spin" /> Reading…</> : 'Make it AI-ready'}
+          </button>
+        </div>
+        {note && <div className="banner ok" style={{ marginTop: 16 }}>{note}</div>}
+        {problem && <div className="banner bad" style={{ marginTop: 16 }}>{problem}</div>}
+      </Card>
+
+      <div className="sechead">Onboarded</div>
       <Card>
         <Load loaded={data.loaded} items={data.merchants} rows={3} empty="No merchants onboarded yet.">{(rows) => (
           <table>

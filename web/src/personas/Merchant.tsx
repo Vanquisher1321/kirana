@@ -31,12 +31,13 @@ function Overview({ shop, picker, data, refresh, onBlocked }: { shop?: Merchant;
   const revenue = paid.reduce((s, o) => s + o.amountMinor, 0);
   const blocked = data.audit.filter((r) => r.action === 'checkout.blocked').length;
 
-  async function connect() {
+  async function connect(target?: string) {
+    const which = target ?? url;
     setBusy(true); setNote(''); setProblem('');
     try {
-      const r = await api.ingest(url);
+      const r = await api.ingest(which);
       setNote(`${r.merchant.name} is open to AI shoppers — ${r.productCount} products, ${r.variantCount} buying options, in ${r.durationMs}ms. ${r.usedLlm ? 'Some details were interpreted by a model.' : 'Read straight from the shop’s own feed, so no model guessed at any price.'}`);
-      setUrl('');
+      if (!target) setUrl('');
       await refresh();
     } catch (e) {
       if ((e as Error).name === 'Unauthorized') onBlocked();
@@ -62,7 +63,14 @@ function Overview({ shop, picker, data, refresh, onBlocked }: { shop?: Merchant;
       <Card
         title="Your shop’s AI address"
         sub="Give this to any AI assistant and it can browse your catalogue and buy from you. Nothing to install on your website."
-        right={shop ? <button className="btn sm ghost" onClick={() => void navigator.clipboard.writeText(shop.mcpUrl)}>Copy link</button> : undefined}
+        right={shop ? (
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn sm ghost" disabled={busy} onClick={() => void connect(shop.originUrl)}>
+              {busy ? <><span className="spin" /> Re-reading…</> : 'Re-sync catalogue'}
+            </button>
+            <button className="btn sm ghost" onClick={() => void navigator.clipboard.writeText(shop.mcpUrl)}>Copy link</button>
+          </div>
+        ) : undefined}
       >
         {shop ? (
           <>
@@ -89,7 +97,8 @@ function Overview({ shop, picker, data, refresh, onBlocked }: { shop?: Merchant;
         ) : <Empty>Connect a shop below to get your AI address.</Empty>}
       </Card>
 
-      <Card title="Connect a shop" sub="Paste any shop’s website. We read what it sells and hand back one link AI assistants can shop from.">
+      {!shop && (
+      <Card title="Connect your shop" sub="Paste your website. We read what you sell and hand back one link AI assistants can shop from. Nothing to install.">
         <div className="row">
           <input className="field" type="text" placeholder="bluetokaicoffee.com" value={url}
             onChange={(e) => setUrl(e.target.value)}
@@ -98,9 +107,12 @@ function Overview({ shop, picker, data, refresh, onBlocked }: { shop?: Merchant;
             {busy ? <><span className="spin" /> Reading…</> : 'Make it AI-ready'}
           </button>
         </div>
-        {note && <div className="banner ok" style={{ marginTop: 16 }}>{note}</div>}
         {problem && <div className="banner bad" style={{ marginTop: 16 }}>{problem}</div>}
       </Card>
+      )}
+
+      {note && <div className="banner ok" style={{ marginBottom: 16 }}>{note}</div>}
+      {shop && problem && <div className="banner bad" style={{ marginBottom: 16 }}>{problem}</div>}
 
       <div className="sechead">Latest AI orders</div>
       <Card>
