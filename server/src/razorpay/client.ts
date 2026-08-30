@@ -1,0 +1,178 @@
+import { config } from '../lib/config.ts';
+
+/**
+ * Minimal Razorpay REST client built on fetch.
+ *
+ * Deliberately not the official SDK: this is ~150 lines, adds no dependency,
+ * and -- more importantly -- lets the retry and circuit-breaker behaviour be
+ * explicit and testable. In a payments path, "what exactly happens when the
+ * gateway returns 502 halfway through" is not something to inherit blindly.
+ */
+
+const BASE = 'https://api.razorpay.com/v1';
+
+export class RazorpayError extends Error {
+  status: number;
+  code: string;
+  description: string;
+  retryable: boolean;
+  constructor(status: number, code: string, description: string) {
+    super(`Razorpay ${status} ${code}: ${description}`);
+    this.name = 'RazorpayError';
+    this.status = status;
+    this.code = code;
+    this.description = description;
+    // 4xx means we sent something wrong; retrying sends the same wrong thing.
+    // 429 and 5xx are the gateway's problem and may clear on their own.
+    this.retryable = status === 429 || status >= 500;
+  }
+}
+
+export class CircuitOpenError extends Error {
+  constructor(until: number) {
+    super(`Razorpay circuit breaker is open until ${new Date(until).toISOString()}. No request was sent.`);
+    this.name = 'CircuitOpenError';
+  }
+}
+
+/**
+ * Circuit breaker. After repeated gateway failures we stop sending requests
+ * entirely for a cooldown, rather than hammering a struggling gateway and
+ * piling up ambiguous in-flight charges. Ambiguity is the enemy: a request that
+ * may or may not have taken money is worse than one that definitely did not.
+ */
+const BREAKER = { failures: 0, openUntil: 0, threshold: 4, cooldownMs: 30_000 };
+
+export function circuitState() {
+  return {
+    open: Date.now() < BREAKER.openUntil,
+    failures: BREAKER.failures,
+    openUntil: BREAKER.openUntil ? new Date(BREAKER.openUntil).toISOString() : null,
+  };
+}
+
+export function resetCircuit(): void {
+  BREAKER.failures = 0;
+  BREAKER.openUntil = 0;
+}
+
+function recordFailure(): void {
+  BREAKER.failures += 1;
+  if (BREAKER.failures >= BREAKER.threshold) {
+    BREAKER.openUntil = Date.now() + BREAKER.cooldownMs;
+    BREAKER.failures = 0;
+  }
+}
+
+function authHeader(): string {
+  const raw = `${config.razorpay.keyId}:${config.razorpay.keySecret}`;
+  return `Basic ${Buffer.from(raw).toString('base64')}`;
+}
+
+export interface CallOptions {
+  method?: 'GET' | 'POST';
+  body?: Record<string, unknown>;
+  attempts?: number;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export async function call<T>(path: string, opts: CallOptions = {}): Promise<T> {
+  if (!config.razorpay.configured) {
+    throw new RazorpayError(0, 'not_configured', 'Razorpay keys are not set; checkout is disabled.');
+  }
+  if (Date.now() < BREAKER.openUntil) throw new CircuitOpenError(BREAKER.openUntil);
+
+  const doFetch = opts.fetchImpl ?? fetch;
+  const attempts = opts.attempts ?? 3;
+  let lastErr: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 15_000);
+    try {
+      const res = await doFetch(`${BASE}${path}`, {
+        method: opts.method ?? 'GET',
+        headers: {
+          authorization: authHeader(),
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        body: opts.body ? JSON.stringify(opts.body) : undefined,
+        signal: ctl.signal,
+      });
+
+      const text = await res.text();
+      const parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+
+      if (!res.ok) {
+        const err = (parsed.error ?? {}) as { code?: string; description?: string };
+        const rzpErr = new RazorpayError(res.status, err.code ?? 'unknown', err.description ?? text.slice(0, 200));
+        if (!rzpErr.retryable || attempt === attempts) {
+          if (rzpErr.retryable) recordFailure();
+          throw rzpErr;
+        }
+        recordFailure();
+        lastErr = rzpErr;
+        await sleep(200 * 2 ** (attempt - 1));
+        continue;
+      }
+
+      resetCircuit();
+      return parsed as T;
+    } catch (err) {
+      if (err instanceof RazorpayError) throw err;
+      recordFailure();
+      lastErr = err;
+      if (attempt === attempts) break;
+      await sleep(200 * 2 ** (attempt - 1));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  throw lastErr instanceof Error ? lastErr : new Error('Razorpay request failed');
+}
+
+export interface RzpOrder { id: string; amount: number; currency: string; receipt?: string; status: string; }
+export interface RzpPaymentLink { id: string; short_url: string; status: string; amount: number; reference_id?: string; }
+export interface RzpPayment { id: string; amount: number; currency: string; status: string; order_id?: string; error_code?: string | null; error_description?: string | null; }
+
+export function createOrder(input: {
+  amountMinor: number; currency: string; receipt: string; notes?: Record<string, string>;
+}, opts: CallOptions = {}): Promise<RzpOrder> {
+  return call<RzpOrder>('/orders', {
+    ...opts,
+    method: 'POST',
+    body: {
+      amount: input.amountMinor,
+      currency: input.currency,
+      receipt: input.receipt.slice(0, 40),
+      notes: input.notes ?? {},
+    },
+  });
+}
+
+export function createPaymentLink(input: {
+  amountMinor: number; currency: string; description: string; referenceId: string;
+  callbackUrl?: string; notes?: Record<string, string>; expireBy?: number;
+}, opts: CallOptions = {}): Promise<RzpPaymentLink> {
+  const body: Record<string, unknown> = {
+    amount: input.amountMinor,
+    currency: input.currency,
+    description: input.description.slice(0, 2048),
+    reference_id: input.referenceId.slice(0, 40),
+    notes: input.notes ?? {},
+    notify: { sms: false, email: false },
+    reminder_enable: false,
+  };
+  if (input.callbackUrl) { body.callback_url = input.callbackUrl; body.callback_method = 'get'; }
+  if (input.expireBy) body.expire_by = input.expireBy;
+  return call<RzpPaymentLink>('/payment_links', { ...opts, method: 'POST', body });
+}
+
+export function fetchPayment(paymentId: string, opts: CallOptions = {}): Promise<RzpPayment> {
+  return call<RzpPayment>(`/payments/${paymentId}`, opts);
+}

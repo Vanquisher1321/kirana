@@ -2,7 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
   toolGetMerchantInfo, toolSearchProducts, toolGetProduct,
-  toolCreateQuote, toolGetQuote, type ToolContext,
+  toolCreateQuote, toolGetQuote, toolRequestApproval, toolGetApproval,
+  toolCheckout, toolGetOrder, type ToolContext,
 } from './tools.ts';
 import type { Merchant } from '../types.ts';
 
@@ -102,6 +103,60 @@ export function buildMcpServer(merchant: Merchant, agentId: string | null): McpS
       inputSchema: { quote_id: z.string() },
     },
     async (args) => ok(toolGetQuote(ctx, args as never)),
+  );
+
+  server.registerTool(
+    'request_approval',
+    {
+      title: 'Ask the human to approve a spend',
+      description:
+        'Ask a human to approve spending up to a cap for one specific quote. Returns a pending approval ' +
+        'and a link for the human to click. You CANNOT approve this yourself and you cannot raise the cap ' +
+        'later — if the basket costs more than the budget, say so and ask, do not quietly shrink the order.',
+      inputSchema: {
+        quote_id: z.string(),
+        spend_cap_inr: z.union([z.number(), z.string()]).describe('Maximum rupees the human is being asked to allow, e.g. 1500'),
+      },
+    },
+    async (args) => ok(toolRequestApproval(ctx, args as never)),
+  );
+
+  server.registerTool(
+    'get_approval',
+    {
+      title: 'Check approval status',
+      description: 'Has the human approved yet? Poll this at a human pace — every few seconds, not in a tight loop.',
+      inputSchema: { consent_id: z.string() },
+    },
+    async (args) => ok(toolGetApproval(ctx, args as never)),
+  );
+
+  server.registerTool(
+    'checkout',
+    {
+      title: 'Pay for an approved quote',
+      description:
+        'Create the real order once a human has approved. Every guard is re-checked at this moment: signature, ' +
+        'expiry, live prices, stock, the approved cap, per-order and daily ceilings, and duplicate protection. ' +
+        'If anything fails you get the exact gate that stopped it and nothing is charged. Reuse the same ' +
+        'idempotency_key on any retry so a retry can never become a second charge.',
+      inputSchema: {
+        quote_id: z.string(),
+        consent_id: z.string(),
+        idempotency_key: z.string().optional().describe('Reuse the key from a previous attempt when retrying'),
+      },
+    },
+    async (args) => ok(await toolCheckout(ctx, args as never)),
+  );
+
+  server.registerTool(
+    'get_order',
+    {
+      title: 'Order status',
+      description: 'Current state of an order: created, awaiting_payment, paid or failed.',
+      inputSchema: { order_id: z.string() },
+    },
+    async (args) => ok(toolGetOrder(ctx, args as never)),
   );
 
   return server;

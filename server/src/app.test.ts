@@ -72,7 +72,75 @@ test('MCP initialize handshake succeeds', async () => {
 test('MCP exposes the buyer-agent toolset', async () => {
   const r = await rpc('tools/list', {}, 2);
   const names = ((r.result as { tools: Array<{ name: string }> }).tools).map((t) => t.name).sort();
-  assert.deepEqual(names, ['create_quote', 'get_merchant_info', 'get_product', 'get_quote', 'search_products']);
+  assert.deepEqual(names, [
+    'checkout', 'create_quote', 'get_approval', 'get_merchant_info', 'get_order',
+    'get_product', 'get_quote', 'request_approval', 'search_products',
+  ]);
+});
+
+test('the checkout tool documents the constraints an agent must obey', async () => {
+  const r = await rpc('tools/list', {}, 21);
+  const tools = (r.result as { tools: Array<{ name: string; description: string }> }).tools;
+  const approval = tools.find((t) => t.name === 'request_approval')!;
+  assert.match(approval.description, /CANNOT approve this yourself/);
+  assert.match(approval.description, /cannot raise the cap/);
+  const pay = tools.find((t) => t.name === 'checkout')!;
+  assert.match(pay.description, /retry can never become a second charge/);
+});
+
+test('an agent asking to spend more than the basket is told to ask the human', async () => {
+  const merchant = getMerchant('bluehill-example')!;
+  const attikan = searchCatalog(merchant.id, { query: 'attikan' })[0]!;
+  const variant = attikan.variants.find((v) => v.priceMinor === 189910)!;
+  const q = toolJson(await rpc('tools/call', {
+    name: 'create_quote', arguments: { items: [{ variant_id: variant.id, quantity: 1 }] },
+  }, 22));
+
+  // Cap deliberately below the basket total.
+  const low = toolJson(await rpc('tools/call', {
+    name: 'request_approval', arguments: { quote_id: q.quote_id, spend_cap_inr: 100 },
+  }, 23));
+  assert.equal(low.error, 'cap_below_total');
+  assert.match(String(low.message), /do not lower the basket without telling them/);
+
+  // A sufficient cap produces a PENDING approval — never an approved one.
+  const pending = toolJson(await rpc('tools/call', {
+    name: 'request_approval', arguments: { quote_id: q.quote_id, spend_cap_inr: 2000 },
+  }, 24));
+  assert.equal(pending.status, 'pending');
+  assert.ok(String(pending.consent_id).startsWith('csnt_'));
+
+  // And the agent cannot pay while it is still pending.
+  const blocked = toolJson(await rpc('tools/call', {
+    name: 'checkout', arguments: { quote_id: q.quote_id, consent_id: pending.consent_id },
+  }, 25));
+  assert.equal(blocked.paid, false);
+  assert.equal(blocked.blocked_by, 'consent_live');
+});
+
+test('the console can approve a pending request, and only a human can', async () => {
+  const approvals = await (await fetch(`${base}/api/approvals`)).json() as Array<{ id: string; capFormatted: string }>;
+  assert.ok(approvals.length >= 1);
+  const target = approvals[0]!;
+  assert.match(target.capFormatted, /^₹/);
+  const res = await fetch(`${base}/api/approvals/${target.id}/approve`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ by: 'om' }),
+  });
+  const granted = await res.json() as { status: string; grantedBy: string };
+  assert.equal(granted.status, 'granted');
+  assert.equal(granted.grantedBy, 'om');
+});
+
+test('the kill switch is reachable from the console and reported by the API', async () => {
+  await fetch(`${base}/api/system/kill-switch`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ engage: true, reason: 'test' }),
+  });
+  const sys = await (await fetch(`${base}/api/system`)).json() as { killSwitch: { engaged: boolean } };
+  assert.equal(sys.killSwitch.engaged, true);
+  await fetch(`${base}/api/system/kill-switch`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ engage: false }),
+  });
 });
 
 test('an agent can discover the shop', async () => {

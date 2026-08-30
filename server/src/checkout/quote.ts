@@ -4,6 +4,7 @@ import { id } from '../lib/id.ts';
 import { config } from '../lib/config.ts';
 import { getVariant, getMerchant } from '../catalog/store.ts';
 import { record } from '../audit/ledger.ts';
+import { ensureAgent } from './agents.ts';
 
 /**
  * A quote is a signed, expiring, immutable price.
@@ -91,6 +92,7 @@ export function createQuote(
 ): Quote {
   const merchant = getMerchant(merchantId);
   if (!merchant) throw new QuoteError('merchant_not_found', `No merchant ${merchantId}.`);
+  ensureAgent(agentId);
 
   if (!Array.isArray(lines) || lines.length === 0) {
     throw new QuoteError('empty_cart', 'A quote needs at least one line item.');

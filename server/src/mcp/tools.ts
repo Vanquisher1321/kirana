@@ -187,3 +187,130 @@ export function toolGetQuote(ctx: ToolContext, args: { quote_id: string }) {
     })),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Payment tools. An agent may ask, quote, and pay within a cap. It may not
+// approve its own spending, raise a cap, or alter a price.
+// ---------------------------------------------------------------------------
+
+import { requestConsent, getConsent, ConsentError } from '../checkout/consent.ts';
+import { checkout, getOrder } from '../checkout/checkout.ts';
+import { getQuote as loadQuote } from '../checkout/quote.ts';
+import { config } from '../lib/config.ts';
+import { id as newId } from '../lib/id.ts';
+
+function consoleUrl(): string {
+  return config.publicOrigin || `http://localhost:${config.port}`;
+}
+
+export function toolRequestApproval(ctx: ToolContext, args: { quote_id: string; spend_cap_inr: number | string }) {
+  const q = loadQuote(args.quote_id);
+  if (!q || q.merchantId !== ctx.merchantId) return { error: 'quote_not_found', message: `No quote ${args.quote_id}.` };
+
+  let capMinor: number;
+  try {
+    capMinor = toMinor(args.spend_cap_inr);
+  } catch {
+    return { error: 'bad_cap', message: 'spend_cap_inr must be a rupee amount, e.g. 1500.' };
+  }
+
+  if (capMinor < q.totalMinor) {
+    return {
+      error: 'cap_below_total',
+      message: `You asked for a cap of ${formatInr(capMinor)} but the basket totals ${formatInr(q.totalMinor)}. ` +
+        `Ask the human whether to raise the budget — do not lower the basket without telling them.`,
+    };
+  }
+
+  try {
+    const c = requestConsent({ quoteId: q.id, agentId: ctx.agentId, capMinor, scope: ctx.merchantId });
+    return {
+      consent_id: c.id,
+      status: 'pending',
+      cap: formatInr(c.capMinor),
+      basket_total: formatInr(q.totalMinor),
+      expires_at: c.expiresAt,
+      approve_url: `${consoleUrl()}/approve/${c.id}`,
+      message:
+        'A human must approve this before anything can be charged. Show them the approval link, ' +
+        'or tell them to open the Kirana console. Poll get_approval until the status changes; ' +
+        'do not attempt checkout before it says granted.',
+    };
+  } catch (err) {
+    if (err instanceof ConsentError) return { error: err.code, message: err.message };
+    throw err;
+  }
+}
+
+export function toolGetApproval(ctx: ToolContext, args: { consent_id: string }) {
+  const c = getConsent(args.consent_id);
+  if (!c) return { error: 'not_found', message: `No approval ${args.consent_id}.` };
+  const expired = Date.parse(c.expiresAt) <= Date.now() && c.status === 'pending';
+  return {
+    consent_id: c.id,
+    status: expired ? 'expired' : c.status,
+    cap: formatInr(c.capMinor),
+    quote_id: c.quoteId,
+    approved_by: c.grantedBy || null,
+    expires_at: c.expiresAt,
+    next_step:
+      c.status === 'granted' ? 'Approved. You may now call checkout with this consent_id.'
+      : c.status === 'pending' ? 'Still waiting on the human. Do not retry more than once every few seconds.'
+      : `This approval is ${c.status} and cannot be used. Tell the human what happened.`,
+  };
+}
+
+export async function toolCheckout(ctx: ToolContext, args: { quote_id: string; consent_id: string; idempotency_key?: string }) {
+  const key = args.idempotency_key?.trim() || newId('idem');
+  const out = await checkout({
+    quoteId: args.quote_id,
+    consentId: args.consent_id,
+    merchantId: ctx.merchantId,
+    agentId: ctx.agentId,
+    idempotencyKey: key,
+  });
+
+  if (!out.ok) {
+    return {
+      paid: false,
+      blocked_by: out.blockedBy,
+      reason: out.reason,
+      // The agent is told exactly which gate stopped it and what every gate
+      // checks, so it can explain the refusal to the human rather than
+      // inventing one or silently retrying.
+      gates: out.checks.map((c) => ({ gate: c.name, enforces: c.says, passed: c.passed, detail: c.detail })),
+      idempotency_key: key,
+    };
+  }
+
+  return {
+    paid: false,
+    status: 'awaiting_payment',
+    order_id: out.orderId,
+    razorpay_order_id: out.razorpayOrderId,
+    amount: out.amount,
+    currency: out.currency,
+    pay_url: out.payUrl,
+    idempotency_key: key,
+    gates: out.checks.map((c) => ({ gate: c.name, enforces: c.says, passed: c.passed })),
+    message:
+      'Authorised and an order was created on Razorpay. Give the human the pay_url to complete payment. ' +
+      'Poll get_order until status is "paid". If you retry checkout, reuse this exact idempotency_key ' +
+      'so a retry can never become a second charge.',
+  };
+}
+
+export function toolGetOrder(ctx: ToolContext, args: { order_id: string }) {
+  const o = getOrder(args.order_id);
+  if (!o || String(o.merchant_id) !== ctx.merchantId) return { error: 'not_found', message: `No order ${args.order_id}.` };
+  return {
+    order_id: String(o.id),
+    status: String(o.status),
+    amount: formatInr(Number(o.amount_minor)),
+    currency: String(o.currency),
+    razorpay_order_id: (o.razorpay_order_id as string | null) ?? null,
+    razorpay_payment_id: (o.razorpay_payment_id as string | null) ?? null,
+    failure_reason: (o.failure_reason as string | null) ?? null,
+    created_at: String(o.created_at),
+  };
+}

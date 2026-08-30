@@ -15,7 +15,20 @@ mkdirSync(dirname(DB_PATH), { recursive: true });
 
 export const db = new DatabaseSync(DB_PATH);
 
-db.exec('PRAGMA journal_mode = WAL;');
+// WAL is faster, but it needs a shared-memory (-shm) file, which some
+// filesystems -- network shares, virtualised mounts, a few Windows setups --
+// refuse with a bare "disk I/O error". Throughput is irrelevant at this scale,
+// so WAL is attempted and quietly abandoned rather than made a hard dependency.
+for (const mode of ['WAL', 'DELETE']) {
+  try {
+    db.exec(`PRAGMA journal_mode = ${mode};`);
+    break;
+  } catch {
+    // Changing journal mode can fail outright when another process holds the
+    // database, or when the filesystem cannot host the -shm/-wal sidecars.
+    // Neither is fatal: SQLite keeps whatever mode the file already has.
+  }
+}
 db.exec('PRAGMA foreign_keys = ON;');
 
 const SCHEMA = `

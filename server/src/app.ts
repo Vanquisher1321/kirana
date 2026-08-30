@@ -4,8 +4,15 @@ import { config } from './lib/config.ts';
 import { ingestStorefront, IngestError } from './catalog/ingest.ts';
 import { getMerchant, listMerchants, latestRun, searchCatalog } from './catalog/store.ts';
 import { buildMcpServer } from './mcp/server.ts';
-import { list as auditList, verify as auditVerify, forSubject } from './audit/ledger.ts';
+import { list as auditList, verify as auditVerify, forSubject, record } from './audit/ledger.ts';
 import { formatInr } from './lib/money.ts';
+import { listPendingConsents, approveConsent, rejectConsent, revokeConsent, getConsent, ConsentError } from './checkout/consent.ts';
+import { getQuote } from './checkout/quote.ts';
+import { listOrders, getOrder, settleOrder } from './checkout/checkout.ts';
+import { listAgents, setAgentCaps } from './checkout/agents.ts';
+import { KILL_SWITCH, engageKillSwitch, releaseKillSwitch } from './checkout/guard.ts';
+import { circuitState } from './razorpay/client.ts';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 
 export function buildApp() {
     const app = Fastify({
@@ -72,6 +79,156 @@ export function buildApp() {
   });
 
   app.get('/api/audit/verify', async () => auditVerify());
+
+  // -------------------------------------------------------------------------
+  // Approvals — the human half of the loop.
+  // -------------------------------------------------------------------------
+
+  app.get('/api/approvals', async () =>
+    listPendingConsents().map((c) => {
+      const q = getQuote(c.quoteId);
+      return {
+        ...c,
+        capFormatted: formatInr(c.capMinor),
+        quote: q && {
+          id: q.id,
+          total: formatInr(q.totalMinor),
+          totalMinor: q.totalMinor,
+          lines: q.lines.map((l) => ({
+            item: `${l.productTitle} — ${l.variantTitle}`,
+            quantity: l.quantity,
+            unitPrice: formatInr(l.unitPriceMinor),
+            lineTotal: formatInr(l.lineTotalMinor),
+          })),
+        },
+      };
+    }),
+  );
+
+  app.post('/api/approvals/:id/approve', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const by = (request.body as { by?: string } | undefined)?.by ?? 'om';
+    try { return approveConsent(id, by); }
+    catch (err) {
+      if (err instanceof ConsentError) return reply.code(409).send({ error: err.code, message: err.message });
+      throw err;
+    }
+  });
+
+  app.post('/api/approvals/:id/reject', async (request) => {
+    const { id } = request.params as { id: string };
+    return rejectConsent(id, (request.body as { by?: string } | undefined)?.by ?? 'om');
+  });
+
+  app.post('/api/approvals/:id/revoke', async (request) => {
+    const { id } = request.params as { id: string };
+    return revokeConsent(id, (request.body as { by?: string } | undefined)?.by ?? 'om');
+  });
+
+  app.get('/api/approvals/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const c = getConsent(id);
+    if (!c) return reply.code(404).send({ error: 'not_found' });
+    const q = getQuote(c.quoteId);
+    return { ...c, capFormatted: formatInr(c.capMinor), quote: q };
+  });
+
+  // -------------------------------------------------------------------------
+  // Orders, agents, and the stop button.
+  // -------------------------------------------------------------------------
+
+  app.get('/api/orders', async () =>
+    listOrders(100).map((o) => ({
+      id: String(o.id), status: String(o.status),
+      amount: formatInr(Number(o.amount_minor)), amountMinor: Number(o.amount_minor),
+      currency: String(o.currency),
+      razorpayOrderId: (o.razorpay_order_id as string | null) ?? null,
+      razorpayPaymentId: (o.razorpay_payment_id as string | null) ?? null,
+      failureReason: (o.failure_reason as string | null) ?? null,
+      agentId: (o.agent_id as string | null) ?? null,
+      createdAt: String(o.created_at),
+    })),
+  );
+
+  app.get('/api/orders/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const o = getOrder(id);
+    if (!o) return reply.code(404).send({ error: 'not_found' });
+    return { ...o, amountFormatted: formatInr(Number(o.amount_minor)), audit: forSubject(id) };
+  });
+
+  app.get('/api/agents', async () =>
+    listAgents().map((a) => ({ ...a, perOrderCap: formatInr(a.perOrderCapMinor), dailyCap: formatInr(a.dailyCapMinor) })),
+  );
+
+  app.post('/api/agents/:id/caps', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const b = request.body as { perOrderMinor?: number; dailyMinor?: number };
+    const updated = setAgentCaps(id, Number(b.perOrderMinor), Number(b.dailyMinor));
+    return updated ?? reply.code(404).send({ error: 'not_found' });
+  });
+
+  app.get('/api/system', async () => ({
+    killSwitch: { engaged: KILL_SWITCH.engaged, reason: KILL_SWITCH.reason },
+    gateway: circuitState(),
+    razorpay: { configured: config.razorpay.configured, mode: 'test' },
+  }));
+
+  app.post('/api/system/kill-switch', async (request) => {
+    const b = request.body as { engage?: boolean; reason?: string };
+    if (b.engage) engageKillSwitch(b.reason ?? 'stopped from the console');
+    else releaseKillSwitch();
+    record({
+      actor: 'human:console',
+      action: b.engage ? 'kill_switch.engaged' : 'kill_switch.released',
+      subjectId: null, outcome: 'ok', detail: { reason: b.reason ?? null },
+    });
+    return { engaged: KILL_SWITCH.engaged, reason: KILL_SWITCH.reason };
+  });
+
+  // -------------------------------------------------------------------------
+  // Razorpay webhook. Signature is verified before the body is trusted.
+  // -------------------------------------------------------------------------
+
+  app.post('/webhooks/razorpay', { config: { rawBody: true } }, async (request, reply) => {
+    const secret = config.razorpay.webhookSecret;
+    const signature = String(request.headers['x-razorpay-signature'] ?? '');
+    const raw = JSON.stringify(request.body);
+
+    if (secret) {
+      const expected = createHmac('sha256', secret).update(raw).digest('hex');
+      const a = Buffer.from(expected, 'hex');
+      const b = Buffer.from(signature, 'hex');
+      const valid = a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
+      if (!valid) {
+        record({ actor: 'razorpay:webhook', action: 'webhook.rejected', subjectId: null, outcome: 'blocked', detail: { reason: 'bad signature' } });
+        return reply.code(400).send({ error: 'invalid signature' });
+      }
+    }
+
+    const body = request.body as { event?: string; payload?: Record<string, { entity?: Record<string, unknown> }> };
+    const event = body.event ?? 'unknown';
+    const payment = body.payload?.payment?.entity as Record<string, unknown> | undefined;
+    const link = body.payload?.payment_link?.entity as Record<string, unknown> | undefined;
+
+    if (event === 'payment.captured' && payment) {
+      settleOrder({
+        razorpayOrderId: (payment.order_id as string) ?? undefined,
+        referenceId: (link?.reference_id as string) ?? undefined,
+        paymentId: String(payment.id), status: 'paid',
+      });
+    } else if (event === 'payment.failed' && payment) {
+      settleOrder({
+        razorpayOrderId: (payment.order_id as string) ?? undefined,
+        paymentId: String(payment.id), status: 'failed',
+        failureReason: `${String(payment.error_code ?? 'failed')}: ${String(payment.error_description ?? '')}`,
+      });
+    } else {
+      record({ actor: 'razorpay:webhook', action: 'webhook.ignored', subjectId: null, outcome: 'ok', detail: { event } });
+    }
+
+    return { ok: true };
+  });
 
   // ---------------------------------------------------------------------------
   // MCP endpoint, one per merchant.
