@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-process.env.NEXUS_DB = `data/test-ingest-${process.pid}.db`;
+process.env.KIRANA_DB = `data/test-ingest-${process.pid}.db`;
 const { ingestStorefront, normaliseOrigin } = await import('./ingest.ts');
 const { searchCatalog, getMerchant, listMerchants, latestRun } = await import('./store.ts');
 const { verify } = await import('../audit/ledger.ts');

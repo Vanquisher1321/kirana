@@ -10,7 +10,7 @@ import { dirname, resolve } from 'node:path';
  * two minutes and giving up.
  */
 
-const DB_PATH = resolve(process.env.NEXUS_DB ?? 'data/nexus.db');
+const DB_PATH = resolve(process.env.KIRANA_DB ?? 'data/kirana.db');
 mkdirSync(dirname(DB_PATH), { recursive: true });
 
 export const db = new DatabaseSync(DB_PATH);

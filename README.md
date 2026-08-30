@@ -1,4 +1,4 @@
-# Nexus
+# Kirana
 
 **Make any merchant AI-buyable.** Point it at a shop's website and, seconds later,
 that shop has a machine-readable catalogue and a gated checkout that an AI agent
@@ -30,7 +30,7 @@ three giants who each received a hand-built integration.
 Razorpay has millions of merchants. You cannot hand-build integrations for
 millions of merchants.
 
-**Nexus is the machine that does that integration automatically.**
+**Kirana is the machine that does that integration automatically.**
 
 ---
 
@@ -101,7 +101,7 @@ Node 22.18 or newer. Nothing else — no Docker, no database server, no build
 toolchain.
 
 ```bash
-git clone <this repo> && cd nexus
+git clone <this repo> && cd kirana
 npm start
 ```
 
@@ -179,7 +179,7 @@ Stated here rather than discovered by a reviewer.
   unsolved industry-wide and is not solved here.
 - **Rate limits are in memory** and do not survive a restart or span instances.
 - **UAP is not implemented.** It is not publicly specified and still needs RBI
-  approval. Nexus models the *consent shape* — bounded, scoped, expiring,
+  approval. Kirana models the *consent shape* — bounded, scoped, expiring,
   revocable — and claims protocol-readiness, not protocol-compliance.
 
 ---

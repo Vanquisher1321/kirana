@@ -233,7 +233,7 @@ export function toolRequestApproval(ctx: ToolContext, args: { quote_id: string; 
       approve_url: `${consoleUrl()}/approve/${c.id}`,
       message:
         'A human must approve this before anything can be charged. Show them the approval link, ' +
-        'or tell them to open the Nexus console. Poll get_approval until the status changes; ' +
+        'or tell them to open the Kirana console. Poll get_approval until the status changes; ' +
         'do not attempt checkout before it says granted.',
     };
   } catch (err) {

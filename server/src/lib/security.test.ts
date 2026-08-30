@@ -49,7 +49,7 @@ test('SSRF: non-http schemes and odd ports are refused', async () => {
 
 test('SSRF: a hostname that does not resolve is refused rather than attempted', async () => {
   await assert.rejects(
-    () => assertPublicHost('this-domain-should-not-exist-nexus-test.invalid'),
+    () => assertPublicHost('this-domain-should-not-exist-kirana-test.invalid'),
     BlockedHostError,
   );
 });

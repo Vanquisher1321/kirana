@@ -10,7 +10,7 @@ let secretDir = '';
 let bundle: StaticBundle;
 
 before(() => {
-  const base = mkdtempSync(join(tmpdir(), 'nexus-static-'));
+  const base = mkdtempSync(join(tmpdir(), 'kirana-static-'));
   root = join(base, 'dist');
   secretDir = join(base, 'secrets');
   mkdirSync(join(root, 'assets'), { recursive: true });

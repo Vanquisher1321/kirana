@@ -10,7 +10,7 @@
 
 services:
   - type: web
-    name: nexus
+    name: kirana
     runtime: node
     plan: free
     region: singapore
@@ -23,14 +23,14 @@ services:
       # A public sandbox anyone can drive: no login, Razorpay TEST credentials
       # only, and the server refuses to start on a live key. Set this to
       # "locked" for a real deployment.
-      - key: NEXUS_ACCESS
+      - key: KIRANA_ACCESS
         value: demo
-      - key: NEXUS_DB
-        value: /tmp/nexus.db
+      - key: KIRANA_DB
+        value: /tmp/kirana.db
       # Set these in the Render dashboard, never in this file.
-      - key: NEXUS_CONSOLE_TOKEN
+      - key: KIRANA_CONSOLE_TOKEN
         sync: false
-      - key: NEXUS_SIGNING_SECRET
+      - key: KIRANA_SIGNING_SECRET
         sync: false
       - key: RAZORPAY_KEY_ID
         sync: false

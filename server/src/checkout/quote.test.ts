@@ -2,8 +2,8 @@ import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-process.env.NEXUS_DB = `data/test-quote-${process.pid}.db`;
-process.env.NEXUS_SIGNING_SECRET = 'a'.repeat(64);
+process.env.KIRANA_DB = `data/test-quote-${process.pid}.db`;
+process.env.KIRANA_SIGNING_SECRET = 'a'.repeat(64);
 
 const { ingestStorefront } = await import('../catalog/ingest.ts');
 const { getMerchant, searchCatalog } = await import('../catalog/store.ts');

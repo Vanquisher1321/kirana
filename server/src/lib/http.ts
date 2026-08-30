@@ -15,7 +15,7 @@ export function normaliseOrigin(input: string): string {
 }
 
 const DEFAULT_HEADERS = {
-  'user-agent': 'NexusBot/0.1 (+agent-commerce ingestion; contact: merchant console)',
+  'user-agent': 'KiranaBot/0.1 (+agent-commerce ingestion; contact: merchant console)',
   'accept-language': 'en-IN,en;q=0.9',
 };
 

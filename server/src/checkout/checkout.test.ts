@@ -2,8 +2,8 @@ import { test, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-process.env.NEXUS_DB = `data/test-checkout-${process.pid}.db`;
-process.env.NEXUS_SIGNING_SECRET = 'c'.repeat(64);
+process.env.KIRANA_DB = `data/test-checkout-${process.pid}.db`;
+process.env.KIRANA_SIGNING_SECRET = 'c'.repeat(64);
 process.env.RAZORPAY_KEY_ID = 'rzp_test_fake123456';
 process.env.RAZORPAY_KEY_SECRET = 'fakesecret';
 

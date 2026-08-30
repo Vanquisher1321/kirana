@@ -36,7 +36,7 @@ function loadRazorpay(): RazorpayConfig {
     // wants to make to a payments company.
     throw new Error(
       `RAZORPAY_KEY_ID is "${keyId.slice(0, 12)}..." which is not a test key. ` +
-      `Nexus refuses to start with live credentials — use a key beginning rzp_test_.`,
+      `Kirana refuses to start with live credentials — use a key beginning rzp_test_.`,
     );
   }
 
@@ -48,7 +48,7 @@ function loadRazorpay(): RazorpayConfig {
   };
 }
 
-let consoleToken = opt('NEXUS_CONSOLE_TOKEN');
+let consoleToken = opt('KIRANA_CONSOLE_TOKEN');
 let consoleTokenGenerated = false;
 if (!consoleToken) {
   // Never default to "no authentication". An unset token means a fresh one is
@@ -58,7 +58,7 @@ if (!consoleToken) {
   consoleTokenGenerated = true;
 }
 
-let signingSecret = opt('NEXUS_SIGNING_SECRET');
+let signingSecret = opt('KIRANA_SIGNING_SECRET');
 let signingIsEphemeral = false;
 if (!signingSecret) {
   signingSecret = randomBytes(32).toString('hex');
@@ -75,7 +75,7 @@ if (!signingSecret) {
  *
  * The default is `demo` on plain localhost and `locked` the moment the server
  * is publicly reachable (PUBLIC_ORIGIN set), because a console exposed to the
- * internet should not be open by accident. NEXUS_ACCESS overrides both.
+ * internet should not be open by accident. KIRANA_ACCESS overrides both.
  *
  * The public sandbox deliberately runs `demo` with a permanent banner. That is
  * not a hole in the security model — it is Razorpay TEST credentials, where no
@@ -83,7 +83,7 @@ if (!signingSecret) {
  * spend is still capped at ₹2,000 per order. The threat model in SECURITY.md
  * describes a real merchant's console; a sandbox anyone can drive is the point.
  */
-const accessRaw = opt('NEXUS_ACCESS').toLowerCase();
+const accessRaw = opt('KIRANA_ACCESS').toLowerCase();
 const access: 'demo' | 'locked' =
   accessRaw === 'demo' || accessRaw === 'locked'
     ? accessRaw
@@ -94,7 +94,7 @@ export const config = {
   access,
   isDemo: access === 'demo',
   publicOrigin: opt('PUBLIC_ORIGIN').replace(/\/+$/, ''),
-  dbPath: opt('NEXUS_DB', 'data/nexus.db'),
+  dbPath: opt('KIRANA_DB', 'data/kirana.db'),
   signingSecret,
   signingIsEphemeral,
   consoleToken,
@@ -117,7 +117,7 @@ export function describeConfig(): string[] {
   lines.push(`public origin       ${config.publicOrigin || '(not set — MCP URLs will use localhost)'}`);
   lines.push(`razorpay            ${config.razorpay.configured ? `configured (${config.razorpay.keyId.slice(0, 16)}…, TEST mode)` : 'NOT configured — checkout disabled'}`);
   lines.push(`razorpay webhooks   ${config.razorpay.webhookSecret ? 'secret present' : 'no secret — webhook verification disabled'}`);
-  lines.push(`quote signing       ${config.signingIsEphemeral ? 'EPHEMERAL (set NEXUS_SIGNING_SECRET to persist across restarts)' : 'persistent secret'}`);
+  lines.push(`quote signing       ${config.signingIsEphemeral ? 'EPHEMERAL (set KIRANA_SIGNING_SECRET to persist across restarts)' : 'persistent secret'}`);
   lines.push(`console access      ${config.isDemo ? 'DEMO — open, no token needed (sandbox)' : 'LOCKED — token required to approve, connect or pause'}`);
   lines.push(`llm provider        ${config.llm.provider}${config.llm.provider === 'none' ? ' (structured-feed ingestion only)' : ''}`);
   if (config.publicOrigin && !config.razorpay.webhookSecret) {
@@ -125,7 +125,7 @@ export function describeConfig(): string[] {
   }
   if (config.consoleTokenGenerated && !config.isDemo) {
     lines.push('');
-    lines.push('  Console token (generated for this run — set NEXUS_CONSOLE_TOKEN to keep it):');
+    lines.push('  Console token (generated for this run — set KIRANA_CONSOLE_TOKEN to keep it):');
     lines.push(`      ${config.consoleToken}`);
     lines.push('  Paste it into the console when it asks. Anyone with this token can approve spending.');
   }

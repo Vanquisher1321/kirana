@@ -1,5 +1,5 @@
 {
-  "name": "nexus-web",
+  "name": "kirana-web",
   "private": true,
   "type": "module",
   "scripts": {

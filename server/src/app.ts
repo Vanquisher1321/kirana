@@ -21,7 +21,7 @@ import { loadBundle, lookup } from './lib/staticfiles.ts';
 
 export function buildApp() {
     const app = Fastify({
-      logger: process.env.NEXUS_QUIET
+      logger: process.env.KIRANA_QUIET
         ? false
         : { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss', ignore: 'pid,hostname,reqId,responseTime' } } },
       bodyLimit: 2 * 1024 * 1024,
@@ -60,7 +60,7 @@ export function buildApp() {
 
     if (url.startsWith('/api/')) {
       const header = String(request.headers.authorization ?? '');
-      const presented = header.startsWith('Bearer ') ? header.slice(7) : String(request.headers['x-nexus-console'] ?? '');
+      const presented = header.startsWith('Bearer ') ? header.slice(7) : String(request.headers['x-kirana-console'] ?? '');
       // A sandbox is meant to be driven, not admired. Test credentials only.
       if (config.isDemo) return;
 
@@ -78,8 +78,8 @@ export function buildApp() {
     }
 
     if (url.startsWith('/mcp/')) {
-      const key = String(request.headers['x-nexus-agent-key'] ?? '');
-      const label = String(request.headers['x-nexus-agent'] ?? '');
+      const key = String(request.headers['x-kirana-agent-key'] ?? '');
+      const label = String(request.headers['x-kirana-agent'] ?? '');
       const identity = key ? (agentForKey(key)?.id ?? null) : null;
       if (key && !identity) {
         return reply.code(401).send({
@@ -102,7 +102,7 @@ export function buildApp() {
     }
   });
 
-  app.get('/health', async () => ({ ok: true, service: 'nexus', razorpay: config.razorpay.configured }));
+  app.get('/health', async () => ({ ok: true, service: 'kirana', razorpay: config.razorpay.configured }));
 
   // ---------------------------------------------------------------------------
   // Console API
@@ -265,7 +265,7 @@ export function buildApp() {
       agent,
       apiKey,
       note: 'Copy this now — only its hash is stored, so it cannot be shown again.',
-      usage: 'Send it as the x-nexus-agent-key header on the MCP endpoint.',
+      usage: 'Send it as the x-kirana-agent-key header on the MCP endpoint.',
     };
   });
 
@@ -433,7 +433,7 @@ export function buildApp() {
         return reply.code(404).send({ error: 'not found' });
       }
       return reply.code(404).send({
-        service: 'nexus',
+        service: 'kirana',
         note: 'Console not built yet. Run `npm run build:web` from the repo root, or `npm run dev:web` for live reload on port 5173.',
       });
     });

@@ -103,9 +103,9 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutOutcome> {
 
   const receipt = orderId.replace('ord_', 'kir');
   const notes = {
-    nexus_order: orderId,
-    nexus_quote: quote.id,
-    nexus_consent: input.consentId,
+    kirana_order: orderId,
+    kirana_quote: quote.id,
+    kirana_consent: input.consentId,
     merchant: merchant.slug,
     agent: input.agentId ?? 'unregistered',
   };

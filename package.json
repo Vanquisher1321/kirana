@@ -1,5 +1,5 @@
 {
-  "name": "nexus",
+  "name": "kirana",
   "version": "0.1.0",
   "private": true,
   "description": "Make any merchant transactable by an AI buyer. Storefront -> agent-readable catalog -> MCP server -> gated agentic checkout on Razorpay.",

@@ -49,7 +49,7 @@ function nodeVersionOk() {
   return major > 22 || (major === 22 && minor >= 18);
 }
 
-console.log(`\n${c.bold('Nexus')} ${c.dim('— any shop, ready for AI shoppers')}\n`);
+console.log(`\n${c.bold('Kirana')} ${c.dim('— any shop, ready for AI shoppers')}\n`);
 
 if (!nodeVersionOk()) {
   console.error(c.red(`Node ${process.versions.node} is too old. This project needs Node 22.18 or newer,`));
@@ -85,7 +85,7 @@ if (!existsSync(envPath)) {
   console.log(c.dim('  copy server/.env.example to server/.env to enable checkout'));
 } else {
   console.log(c.dim(`  razorpay ${has('RAZORPAY_KEY_ID') ? 'configured' : 'NOT configured — checkout disabled'}`));
-  console.log(c.dim(`  console token ${has('NEXUS_CONSOLE_TOKEN') ? 'set' : 'not set — one will be printed below'}`));
+  console.log(c.dim(`  console token ${has('KIRANA_CONSOLE_TOKEN') ? 'set' : 'not set — one will be printed below'}`));
 }
 
 step(4, TOTAL, 'Seeding a demo shop');

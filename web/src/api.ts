@@ -35,7 +35,7 @@ export interface Verification { ok: boolean; checked: number; brokenAtSeq?: numb
  * single-operator tool on the operator's own machine -- there is no session
  * server to hold it and no second user to leak it to.
  */
-const TOKEN_KEY = 'nexus.console.token';
+const TOKEN_KEY = 'kirana.console.token';
 
 export function getToken(): string {
   try { return localStorage.getItem(TOKEN_KEY) ?? ''; } catch { return ''; }
