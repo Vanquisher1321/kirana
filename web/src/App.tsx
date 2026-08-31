@@ -36,7 +36,7 @@ const NAV: Record<Persona, Array<[string, string] | ['div', '']>> = {
     ['assistants', 'AI Assistants'], ['div', ''], ['record', 'The Record'],
   ],
   shopper: [
-    ['home', 'Home'], ['activity', 'Activity'], ['limits', 'Limits'],
+    ['home', 'Home'], ['shops', 'Shops'], ['activity', 'Activity'], ['limits', 'Limits'],
   ],
   platform: [
     ['overview', 'Overview'], ['merchants', 'Merchants'], ['transactions', 'Transactions'],

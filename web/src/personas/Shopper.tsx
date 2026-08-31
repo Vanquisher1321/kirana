@@ -7,6 +7,7 @@ import type { PersonaProps } from '../App.tsx';
 /** The person whose assistant is spending. One decision, made unmissable —
  *  everything else on this screen exists to make that decision informed. */
 export default function ShopperView({ data, page, refresh, onBlocked }: PersonaProps) {
+  if (page === 'shops') return <Shops data={data} refresh={refresh} onBlocked={onBlocked} />;
   if (page === 'activity') return <Activity data={data} />;
   if (page === 'limits') return <Limits data={data} />;
   return <Home data={data} refresh={refresh} onBlocked={onBlocked} />;
@@ -204,5 +205,95 @@ function Limit({ label, value, pct, note }: { label: string; value: string; pct:
       <div className="bar" style={{ marginTop: 7 }}><i style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} /></div>
       <div className="tiny" style={{ marginTop: 6 }}>{note}</div>
     </div>
+  );
+}
+
+/**
+ * Where a shopper actually starts.
+ *
+ * The console had no way to find a shop at all: the shopper landed on an
+ * approvals queue for spending that could not happen yet, because nothing told
+ * them which shops exist or how to point an assistant at one. The directory
+ * endpoint was built for exactly this and then never surfaced.
+ *
+ * Two things belong here. The list of shops on the network, each with the link
+ * you paste into your assistant — that is the whole handoff between "here is a
+ * console" and "here is my assistant buying something". And a box to add a shop
+ * that is not on the list yet, because the honest answer to "can it shop THIS
+ * store?" is to try it in front of the person asking.
+ */
+function Shops({ data, refresh, onBlocked }: Pick<PersonaProps, 'data' | 'refresh' | 'onBlocked'>) {
+  const [url, setUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [copied, setCopied] = useState('');
+
+  async function add() {
+    setBusy(true); setErr('');
+    try { await api.ingest(url); setUrl(''); await refresh(); }
+    catch (e) {
+      const msg = (e as Error).message;
+      if (/unauthor/i.test(msg)) onBlocked(); else setErr(msg);
+    } finally { setBusy(false); }
+  }
+
+  const copy = (link: string) => {
+    void navigator.clipboard?.writeText(link);
+    setCopied(link);
+    setTimeout(() => setCopied(''), 1500);
+  };
+
+  return (
+    <>
+      <PageHead
+        big
+        title="Shops your assistant can buy from"
+        sub="Give your assistant one of these links and it can browse and buy — within the limits you set."
+      />
+
+      <Card title="Add a shop" sub="Any Shopify or WooCommerce store. We read its public catalogue; nothing is installed on their site.">
+        <div className="row">
+          <input
+            className="field" type="text" placeholder="bluetokaicoffee.com" value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && url && !busy) void add(); }}
+          />
+          <button className="btn" disabled={!url || busy} onClick={() => void add()}>
+            {busy ? 'Reading the shop…' : 'Add shop'}
+          </button>
+        </div>
+        {err && <div className="tiny" style={{ marginTop: 8 }}>{err}</div>}
+      </Card>
+
+      <Card title="On the network now">
+        <Load loaded={data.loaded} items={data.merchants} rows={3} empty="No shops yet — add one above.">
+          {(shops) => (
+            <table>
+              <thead><tr><th>Shop</th><th>Products</th><th>Link for your assistant</th></tr></thead>
+              <tbody>
+                {shops.map((m) => (
+                  <tr key={m.id}>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{m.name}</div>
+                      <div className="tiny dim">{m.currency} · read {timeAgo(m.ingestedAt)}</div>
+                    </td>
+                    <td className="num">{m.products}<div className="tiny dim">{m.variants} options</div></td>
+                    <td>
+                      <div className="mono tiny" style={{ wordBreak: 'break-all' }}>{m.mcpUrl}</div>
+                      <button
+                        className="btn ghost" style={{ marginTop: 6 }}
+                        onClick={() => copy(m.mcpUrl)}
+                      >
+                        {copied === m.mcpUrl ? 'Copied' : 'Copy link'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Load>
+      </Card>
+    </>
   );
 }
