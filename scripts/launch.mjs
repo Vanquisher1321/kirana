@@ -86,31 +86,69 @@ if (!existsSync(envPath)) {
 } else {
   console.log(c.dim(`  razorpay ${has('RAZORPAY_KEY_ID') ? 'configured' : 'NOT configured — checkout disabled'}`));
   console.log(c.dim(`  console token ${has('KIRANA_CONSOLE_TOKEN') ? 'set' : 'not set — one will be printed below'}`));
+  console.log(c.dim(`  webhooks ${has('RAZORPAY_WEBHOOK_SECRET') ? 'verified (secret set)' : 'REFUSED — RAZORPAY_WEBHOOK_SECRET is empty; the reconciler still settles payments'}`));
+  console.log(c.dim(`  access ${/^KIRANA_ACCESS=demo$/m.test(env) ? 'demo — console open, no token' : has('PUBLIC_ORIGIN') ? 'locked — a token is needed to act' : 'demo (local default)'}`));
 }
 
 step(4, TOTAL, 'Seeding a demo shop');
 run(npm, ['run', 'seed'], SERVER, 'Seed');
 
+/**
+ * Wait for the tunnel to name itself, THEN start the server with that name.
+ *
+ * A cloudflared quick tunnel gets a NEW random hostname on every run, so a
+ * PUBLIC_ORIGIN written into .env is stale the moment the tunnel restarts.
+ * This used to print "set PUBLIC_ORIGIN=... and restart", which is a two-boot
+ * dance before every demo and a stale value in .env the rest of the time --
+ * and a stale PUBLIC_ORIGIN is not cosmetic: it is the hostname handed to
+ * every buyer agent as its MCP endpoint.
+ *
+ * Node's --env-file does not override a variable already present in the
+ * environment, so passing it here wins over whatever .env says, without
+ * editing .env at all.
+ */
 let tunnel = null;
+let publicOrigin = '';
 if (wantTunnel) {
   step(5, TOTAL, 'Starting a public tunnel (Docker)');
   tunnel = spawn('docker', ['run', '--rm', 'cloudflare/cloudflared:latest', 'tunnel', '--url', 'http://host.docker.internal:3000'], { shell: isWin });
-  const onTunnelData = (buf) => {
-    const text = buf.toString();
-    const m = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-    if (m) {
-      console.log(`\n  ${c.green('Public URL')}  ${m[0]}`);
-      console.log(c.dim(`  set PUBLIC_ORIGIN=${m[0]} in server/.env and restart to use it for MCP and webhooks\n`));
-    }
-  };
-  tunnel.stdout?.on('data', onTunnelData);
-  tunnel.stderr?.on('data', onTunnelData);
-  tunnel.on('error', () => console.log(c.red('  could not start Docker — continuing without a tunnel')));
+
+  publicOrigin = await new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      console.log(c.red('  tunnel did not report a URL in 40s — continuing without one'));
+      resolve('');
+    }, 40_000);
+    const onTunnelData = (buf) => {
+      const m = buf.toString().match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+      if (!m) return;
+      clearTimeout(timer);
+      resolve(m[0]);
+    };
+    tunnel.stdout?.on('data', onTunnelData);
+    tunnel.stderr?.on('data', onTunnelData);
+    tunnel.on('error', () => {
+      clearTimeout(timer);
+      console.log(c.red('  could not start Docker — continuing without a tunnel'));
+      resolve('');
+    });
+  });
+
+  if (publicOrigin) {
+    console.log(`\n  ${c.green('Public URL')}  ${publicOrigin}`);
+    console.log(c.dim('  used automatically for MCP endpoints — no .env edit, no restart'));
+    console.log(`  ${c.bold('Razorpay webhook URL')}  ${publicOrigin}/webhooks/razorpay`);
+    console.log(c.dim('  this hostname is new every run, so update it in the Razorpay dashboard\n'));
+  }
 }
 
 step(wantTunnel ? 6 : 5, TOTAL, 'Starting the server\n');
 
-const server = spawn(npm, ['start'], { cwd: SERVER, stdio: 'inherit', shell: isWin });
+const server = spawn(npm, ['start'], {
+  cwd: SERVER,
+  stdio: 'inherit',
+  shell: isWin,
+  env: publicOrigin ? { ...process.env, PUBLIC_ORIGIN: publicOrigin } : process.env,
+});
 
 const url = 'http://localhost:3000';
 const openBrowser = () => {
@@ -133,7 +171,10 @@ async function waitForHealth() {
 waitForHealth().then((up) => {
   if (!up) return;
   console.log(`\n${c.green('Console')}  ${url}`);
-  console.log(c.dim('  Paste the console token above when it asks. Ctrl+C stops everything.\n'));
+  const demo = /^KIRANA_ACCESS=demo$/m.test(env) || !existsSync(envPath);
+  console.log(c.dim(demo
+    ? '  Open, no token needed. Ctrl+C stops everything.\n'
+    : '  Paste the console token above when it asks. Ctrl+C stops everything.\n'));
   openBrowser();
 });
 
