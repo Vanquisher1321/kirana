@@ -45,7 +45,7 @@ export function getAgent(agentId: string): Agent | null {
 }
 
 /** Idempotent. Returns null for the anonymous caller so callers can pass through. */
-export function ensureAgent(agentId: string | null, label?: string): Agent | null {
+export function ensureAgent(agentId: string | null, label?: string, workspaceId: string | null = null): Agent | null {
   if (!agentId) return null;
   const existing = getAgent(agentId);
   if (existing) return existing;
@@ -64,6 +64,7 @@ export function ensureAgent(agentId: string | null, label?: string): Agent | nul
      VALUES (?,?,?,?,?,1,0,?)`,
   ).run(agent.id, agent.label, hashKey(`unverified:${agent.id}`),
     agent.dailyCapMinor, agent.perOrderCapMinor, agent.createdAt);
+  if (workspaceId) db.prepare('UPDATE agents SET workspace_id = ? WHERE id = ?').run(workspaceId, agent.id);
 
   record({
     actor: 'system',
@@ -81,8 +82,11 @@ export function ensureAgent(agentId: string | null, label?: string): Agent | nul
   return agent;
 }
 
-export function listAgents(): Agent[] {
-  return (db.prepare('SELECT * FROM agents ORDER BY created_at DESC').all() as Record<string, unknown>[]).map(rowToAgent);
+export function listAgents(workspaceId?: string | null): Agent[] {
+  const rows = workspaceId === undefined
+    ? db.prepare('SELECT * FROM agents ORDER BY created_at DESC').all()
+    : db.prepare('SELECT * FROM agents WHERE workspace_id IS ? ORDER BY created_at DESC').all(workspaceId);
+  return (rows as Record<string, unknown>[]).map(rowToAgent);
 }
 
 /** Issues a real key. The plaintext is returned once and never stored. */

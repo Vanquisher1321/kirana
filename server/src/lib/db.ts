@@ -34,13 +34,18 @@ db.exec('PRAGMA foreign_keys = ON;');
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS merchants (
   id          TEXT PRIMARY KEY,
-  slug        TEXT NOT NULL UNIQUE,
+  slug        TEXT NOT NULL,
   name        TEXT NOT NULL,
   origin_url  TEXT NOT NULL,
   platform    TEXT NOT NULL,
   currency    TEXT NOT NULL DEFAULT 'INR',
   policies    TEXT NOT NULL DEFAULT '{}',
-  ingested_at TEXT NOT NULL
+  ingested_at TEXT NOT NULL,
+  workspace_id TEXT,
+  public_id    TEXT,
+  -- Unique WITHIN a tenant, not globally: two workspaces may each ingest the
+  -- same shop, and a slug is a human-readable name, not an identity.
+  UNIQUE (workspace_id, slug)
 );
 
 CREATE TABLE IF NOT EXISTS products (
@@ -151,6 +156,17 @@ CREATE TABLE IF NOT EXISTS orders (
   updated_at          TEXT NOT NULL
 );
 
+-- A workspace is the tenant. Everything a visitor creates belongs to exactly
+-- one, so two people using the same instance never see each other's shops,
+-- approvals or orders. Created silently on first visit; sign-in can be layered
+-- on later without changing this model.
+CREATE TABLE IF NOT EXISTS workspaces (
+  id           TEXT PRIMARY KEY,
+  label        TEXT NOT NULL DEFAULT 'Workspace',
+  created_at   TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL
+);
+
 -- Append-only, hash-chained. Row N stores the hash of row N-1, so any edit or
 -- deletion downstream breaks verification. This is the audit trail the track
 -- asks for, and it is checkable rather than merely claimed.
@@ -172,9 +188,60 @@ db.exec(SCHEMA);
 
 // Additive migrations. SQLite has no ADD COLUMN IF NOT EXISTS, so each is
 // attempted and ignored when already applied.
+/**
+ * One structural migration that ALTER TABLE cannot express.
+ *
+ * `slug` was declared globally UNIQUE, which was right before tenancy and wrong
+ * after it: two workspaces ingesting the same shop legitimately share a slug.
+ * SQLite cannot drop a column constraint, so the table is rebuilt in place.
+ */
+const merchantsDdl = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='merchants'").get() as { sql?: string } | undefined)?.sql ?? '';
+if (/slug\s+TEXT NOT NULL UNIQUE/i.test(merchantsDdl)) {
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec('BEGIN');
+  try {
+    db.exec(`CREATE TABLE merchants_rebuilt (
+      id TEXT PRIMARY KEY, slug TEXT NOT NULL, name TEXT NOT NULL, origin_url TEXT NOT NULL,
+      platform TEXT NOT NULL, currency TEXT NOT NULL DEFAULT 'INR',
+      policies TEXT NOT NULL DEFAULT '{}', ingested_at TEXT NOT NULL,
+      workspace_id TEXT, public_id TEXT, UNIQUE (workspace_id, slug)
+    );`);
+    const cols = (db.prepare("PRAGMA table_info(merchants)").all() as Array<{ name: string }>).map((c) => c.name);
+    const has = (c: string) => cols.includes(c);
+    db.exec(`INSERT INTO merchants_rebuilt (id, slug, name, origin_url, platform, currency, policies, ingested_at, workspace_id, public_id)
+      SELECT id, slug, name, origin_url, platform, currency, policies, ingested_at,
+             ${has('workspace_id') ? 'workspace_id' : 'NULL'}, ${has('public_id') ? 'public_id' : 'NULL'}
+      FROM merchants;`);
+    db.exec('DROP TABLE merchants;');
+    db.exec('ALTER TABLE merchants_rebuilt RENAME TO merchants;');
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  db.exec('PRAGMA foreign_keys = ON;');
+}
+
 for (const stmt of [
   'ALTER TABLE orders ADD COLUMN razorpay_payment_link_id TEXT',
   'ALTER TABLE agents ADD COLUMN verified INTEGER NOT NULL DEFAULT 0',
+  // Tenancy. Nullable so pre-existing rows keep working; new rows always set it.
+  'ALTER TABLE merchants ADD COLUMN workspace_id TEXT',
+  // An unguessable id for the merchant's MCP URL. Slugs are human-readable but
+  // collide across tenants -- two workspaces both ingesting Blue Tokai would
+  // fight over the same address. Knowing this id IS the capability.
+  'ALTER TABLE merchants ADD COLUMN public_id TEXT',
+  'ALTER TABLE agents ADD COLUMN workspace_id TEXT',
+  'ALTER TABLE quotes ADD COLUMN workspace_id TEXT',
+  'ALTER TABLE consents ADD COLUMN workspace_id TEXT',
+  'ALTER TABLE orders ADD COLUMN workspace_id TEXT',
+  'ALTER TABLE audit_log ADD COLUMN workspace_id TEXT',
+  // Who this workspace is. Null until the visitor says.
+  'ALTER TABLE workspaces ADD COLUMN role TEXT',
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_merchants_public ON merchants(public_id)',
+  'CREATE INDEX IF NOT EXISTS idx_merchants_ws ON merchants(workspace_id)',
+  'CREATE INDEX IF NOT EXISTS idx_orders_ws ON orders(workspace_id)',
+  'CREATE INDEX IF NOT EXISTS idx_audit_ws ON audit_log(workspace_id)',
 ]) {
   try { db.exec(stmt); } catch { /* already applied */ }
 }

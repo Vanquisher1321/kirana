@@ -16,15 +16,33 @@ import { circuitState } from '../razorpay/client.ts';
  * track's bar is that every money action be explainable.
  */
 
-export const KILL_SWITCH = { engaged: false, reason: '' };
+export const KILL_SWITCH = { engaged: false, reason: '', releasesAt: 0 };
 
-export function engageKillSwitch(reason: string): void {
+/**
+ * On the public sandbox the stop button is meant to be TRIED, so it releases
+ * itself after a few minutes. A visitor can prove it works; nobody can leave
+ * the demo frozen for everyone who comes after. On a real deployment it stays
+ * engaged until a human releases it, which is the whole point of a stop button.
+ */
+export function engageKillSwitch(reason: string, autoReleaseMs = 0): void {
   KILL_SWITCH.engaged = true;
   KILL_SWITCH.reason = reason;
+  KILL_SWITCH.releasesAt = autoReleaseMs > 0 ? Date.now() + autoReleaseMs : 0;
+}
+
+/** True if engaged and not past its automatic release. */
+export function killSwitchActive(): boolean {
+  if (!KILL_SWITCH.engaged) return false;
+  if (KILL_SWITCH.releasesAt && Date.now() >= KILL_SWITCH.releasesAt) {
+    releaseKillSwitch();
+    return false;
+  }
+  return true;
 }
 export function releaseKillSwitch(): void {
   KILL_SWITCH.engaged = false;
   KILL_SWITCH.reason = '';
+  KILL_SWITCH.releasesAt = 0;
 }
 
 /** Caps applied when a buyer agent is unregistered. Conservative on purpose. */
@@ -123,8 +141,9 @@ export function authorise(input: GuardInput): GuardResult {
   };
 
   // 1. Global stop.
-  if (!add('kill_switch', 'A human can stop all spending instantly.', !KILL_SWITCH.engaged,
-    KILL_SWITCH.engaged ? `Engaged: ${KILL_SWITCH.reason}` : 'Not engaged')) {
+  const stopped = killSwitchActive();
+  if (!add('kill_switch', 'A human can stop all spending instantly.', !stopped,
+    stopped ? `Engaged: ${KILL_SWITCH.reason}` : 'Not engaged')) {
     return fail('kill_switch', `All agent spending is paused: ${KILL_SWITCH.reason}`);
   }
 

@@ -18,6 +18,8 @@ export interface AuditEntry {
   subjectId?: string | null;
   outcome: 'ok' | 'blocked' | 'failed';
   detail?: Record<string, unknown>;
+  /** Null for system events that belong to no tenant. */
+  workspaceId?: string | null;
 }
 
 export interface AuditRow {
@@ -52,8 +54,8 @@ function computeHash(i: HashInput): string {
 }
 
 const insertStmt = db.prepare(
-  `INSERT INTO audit_log (ts, actor, action, subject_id, outcome, detail, prev_hash, hash)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  `INSERT INTO audit_log (ts, actor, action, subject_id, outcome, detail, prev_hash, hash, workspace_id)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 );
 const lastStmt = db.prepare('SELECT hash FROM audit_log ORDER BY seq DESC LIMIT 1');
 
@@ -64,7 +66,7 @@ export function record(entry: AuditEntry): string {
   const detail = JSON.stringify(entry.detail ?? {});
   const subjectId = entry.subjectId ?? null;
   const hash = computeHash({ ts, actor: entry.actor, action: entry.action, subjectId, outcome: entry.outcome, detail, prevHash });
-  insertStmt.run(ts, entry.actor, entry.action, subjectId, entry.outcome, detail, prevHash, hash);
+  insertStmt.run(ts, entry.actor, entry.action, subjectId, entry.outcome, detail, prevHash, hash, entry.workspaceId ?? null);
   return hash;
 }
 
@@ -76,9 +78,16 @@ function toRow(r: Record<string, unknown>): AuditRow {
   };
 }
 
-export function list(limit = 200): AuditRow[] {
-  const rows = db.prepare('SELECT * FROM audit_log ORDER BY seq DESC LIMIT ?').all(limit) as Record<string, unknown>[];
-  return rows.map(toRow);
+/**
+ * Scoped by workspace. The chain itself stays global and append-only — it must,
+ * or the hashes would not link — but a tenant only ever READS its own entries
+ * plus system events that belong to nobody.
+ */
+export function list(limit = 200, workspaceId?: string | null): AuditRow[] {
+  const rows = workspaceId === undefined
+    ? db.prepare('SELECT * FROM audit_log ORDER BY seq DESC LIMIT ?').all(limit)
+    : db.prepare('SELECT * FROM audit_log WHERE workspace_id IS ? OR workspace_id IS NULL ORDER BY seq DESC LIMIT ?').all(workspaceId, limit);
+  return (rows as Record<string, unknown>[]).map(toRow);
 }
 
 export function forSubject(subjectId: string): AuditRow[] {

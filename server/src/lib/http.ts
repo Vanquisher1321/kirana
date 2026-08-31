@@ -53,11 +53,11 @@ export function makeFetch(timeoutMs = 15_000, opts: { guard?: boolean } = {}): F
         const location = res.headers.get('location');
         if (!location) return res;
 
+        // Re-run the FULL check on every hop, not just the host. The previous
+        // version validated the hostname alone, so a redirect could still
+        // downgrade the scheme or point at an arbitrary internal port.
         const next = new URL(location, current);
-        if (next.protocol !== 'https:' && next.protocol !== 'http:') {
-          throw new Error(`Refusing to follow a redirect to ${next.protocol}`);
-        }
-        await assertPublicHost(next.hostname);
+        await assertFetchableUrl(next.toString());
         current = next.toString();
       } finally {
         clearTimeout(timer);

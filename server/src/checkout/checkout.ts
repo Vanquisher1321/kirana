@@ -215,8 +215,15 @@ export function getOrder(orderId: string): Record<string, unknown> | null {
   return (db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId) as Record<string, unknown>) ?? null;
 }
 
-export function listOrders(limit = 50): Record<string, unknown>[] {
-  return db.prepare('SELECT * FROM orders ORDER BY created_at DESC LIMIT ?').all(limit) as Record<string, unknown>[];
+/** Scoped to a workspace by the merchant that owns the order. Undefined = all. */
+export function listOrders(limit = 50, workspaceId?: string | null): Record<string, unknown>[] {
+  if (workspaceId === undefined) {
+    return db.prepare('SELECT * FROM orders ORDER BY created_at DESC LIMIT ?').all(limit) as Record<string, unknown>[];
+  }
+  return db.prepare(
+    `SELECT o.* FROM orders o JOIN merchants m ON m.id = o.merchant_id
+     WHERE m.workspace_id IS ? ORDER BY o.created_at DESC LIMIT ?`,
+  ).all(workspaceId, limit) as Record<string, unknown>[];
 }
 
 /** Applied by the Razorpay webhook once a real payment lands. */

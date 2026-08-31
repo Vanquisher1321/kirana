@@ -93,6 +93,18 @@ if (!signingSecret) {
  */
 const trustLocalWebhooks = opt('KIRANA_TRUST_LOCAL_WEBHOOKS', 'false') === 'true';
 
+/**
+ * A public sandbox is defended by self-healing, not by locks.
+ *
+ * Nothing here can move real money, so the threat that matters is a visitor
+ * leaving the demo broken or full of junk for the next person. Rather than
+ * gating anyone, the instance repairs itself on a timer, releases a paused
+ * kill switch by itself, and bounds how much state anyone can accumulate.
+ */
+const demoResetMinutes = Number(opt('KIRANA_DEMO_RESET_MINUTES', '30'));
+const demoMaxMerchants = Number(opt('KIRANA_DEMO_MAX_MERCHANTS', '12'));
+const demoKillSwitchMinutes = Number(opt('KIRANA_DEMO_KILLSWITCH_MINUTES', '3'));
+
 const accessRaw = opt('KIRANA_ACCESS').toLowerCase();
 const access: 'demo' | 'locked' =
   accessRaw === 'demo' || accessRaw === 'locked'
@@ -103,6 +115,9 @@ export const config = {
   port: Number(opt('PORT', '3000')),
   access,
   isDemo: access === 'demo',
+  demoResetMinutes,
+  demoMaxMerchants,
+  demoKillSwitchMinutes,
   trustLocalWebhooks,
   publicOrigin: opt('PUBLIC_ORIGIN').replace(/\/+$/, ''),
   dbPath: opt('KIRANA_DB', 'data/kirana.db'),
@@ -129,6 +144,9 @@ export function describeConfig(): string[] {
   lines.push(`razorpay            ${config.razorpay.configured ? `configured (${config.razorpay.keyId.slice(0, 16)}…, TEST mode)` : 'NOT configured — checkout disabled'}`);
   lines.push(`razorpay webhooks   ${config.razorpay.webhookSecret ? 'secret present' : 'no secret — webhook verification disabled'}`);
   lines.push(`quote signing       ${config.signingIsEphemeral ? 'EPHEMERAL (set KIRANA_SIGNING_SECRET to persist across restarts)' : 'persistent secret'}`);
+  if (config.isDemo) {
+    lines.push(`sandbox self-heal   resets every ${config.demoResetMinutes}m · kill switch releases after ${config.demoKillSwitchMinutes}m · max ${config.demoMaxMerchants} shops`);
+  }
   lines.push(`console access      ${config.isDemo ? 'DEMO — open, no token needed (sandbox)' : 'LOCKED — token required to approve, connect or pause'}`);
   lines.push(`llm provider        ${config.llm.provider}${config.llm.provider === 'none' ? ' (structured-feed ingestion only)' : ''}`);
   if (!config.razorpay.webhookSecret) {

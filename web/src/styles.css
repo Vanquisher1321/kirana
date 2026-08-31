@@ -249,3 +249,21 @@ tbody tr { transition: background .12s; }
 .sechead { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 28px 0 12px; }
 .shopsel { background: var(--card); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 6px 10px; font-size: 13px; font-weight: 500; outline: none; }
 .shopsel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Role selection and the demo-only role switch. */
+.rolecard {
+  display: block; width: 100%; text-align: left;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  padding: 20px 22px; transition: border-color .14s, transform .16s var(--ease-out);
+}
+.rolecard:hover:not(:disabled) { border-color: var(--accent); }
+.rolecard:active:not(:disabled) { transform: scale(.995); }
+.rolecard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rolecard:disabled { opacity: .6; cursor: not-allowed; }
+
+.demoswitch { font-size: 11px; color: #6B7280; padding: 0 8px 0 4px; letter-spacing: .02em; }
+.rolechip {
+  display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 8px;
+  background: #111827; border: 1px solid #1F2937; color: #E5E7EB;
+  font-size: 12px; font-weight: 600;
+}

@@ -1,6 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+process.env.KIRANA_DB = join(tmpdir(), `kirana-security-${process.pid}-${Date.now()}.db`);
+
 import { classifyAddress, assertPublicHost, assertFetchableUrl, BlockedHostError, secretEquals, rateLimit, resetRateLimits } from './security.ts';
+
+test('SSRF: the hex spelling of an IPv4-mapped address is caught, not just the dotted one', () => {
+  // ::ffff:a9fe:a9fe IS 169.254.169.254. The WHATWG URL parser normalises
+  // [0:0:0:0:0:ffff:169.254.169.254] into that hex form, which a
+  // dotted-quad regex does not match — so the cloud metadata endpoint was
+  // reachable through a redirect until the address was parsed rather than
+  // pattern-matched.
+  assert.ok(classifyAddress('::ffff:a9fe:a9fe'), '::ffff:a9fe:a9fe is 169.254.169.254');
+  assert.ok(classifyAddress('::ffff:7f00:1'), '::ffff:7f00:1 is 127.0.0.1');
+  assert.ok(classifyAddress('0:0:0:0:0:ffff:7f00:1'), 'expanded form');
+  assert.ok(classifyAddress('64:ff9b::7f00:1'), 'NAT64 embedding a loopback address');
+  assert.ok(classifyAddress('192.88.99.1'), '6to4 relay anycast');
+  // Genuinely public IPv6 still passes.
+  assert.equal(classifyAddress('2606:4700::1111'), null);
+  assert.equal(classifyAddress('2001:4860:4860::8888'), null);
+});
 
 test('SSRF: cloud metadata and every private range are classified as internal', () => {
   const internal = [
@@ -71,4 +91,97 @@ test('rate limiter allows a burst then refuses with a retry hint', () => {
   assert.ok(blocked.retryAfterMs > 0);
   // A different caller has its own budget.
   assert.equal(rateLimit('agent:y', 5, 60_000).ok, true);
+});
+
+test('SANDBOX: the merchant cap keeps the newest shops and evicts the rest', async () => {
+  process.env.KIRANA_ACCESS = 'demo';
+  const { evictOldestMerchants } = await import('./selfheal.ts');
+  const { db } = await import('./db.ts');
+
+  db.exec("DELETE FROM merchants;");
+  const ins = db.prepare("INSERT INTO merchants (id, slug, name, origin_url, platform, currency, policies, ingested_at) VALUES (?,?,?,?,'shopify','INR','{}',?)");
+  for (let i = 0; i < 6; i++) {
+    ins.run(`m${i}`, `shop-${i}`, `Shop ${i}`, `https://s${i}.test`, new Date(2026, 0, i + 1).toISOString());
+  }
+
+  const evicted = evictOldestMerchants(3);
+  assert.equal(evicted, 3, 'three oldest shops removed');
+
+  const left = (db.prepare('SELECT slug FROM merchants ORDER BY ingested_at DESC').all() as Array<{ slug: string }>).map((r) => r.slug);
+  assert.deepEqual(left, ['shop-5', 'shop-4', 'shop-3'], 'the newest survive — a visitor cannot bury the demo shop');
+  db.exec("DELETE FROM merchants;");
+});
+
+test('TENANCY: two workspaces cannot see each other’s shops, orders or record', async () => {
+  const { createWorkspace } = await import('./workspace.ts');
+  const { ingestStorefront } = await import('../catalog/ingest.ts');
+  const { listMerchants, getMerchant, getMerchantForMcp } = await import('../catalog/store.ts');
+  const { readFileSync } = await import('node:fs');
+
+  const FIXTURE = readFileSync(new URL('../adapters/__fixtures__/shopify-store.json', import.meta.url), 'utf8');
+  const fetchImpl = async (url: string | URL) => {
+    const u = String(url);
+    if (u.includes('/meta.json')) return new Response('{"currency":"INR"}', { headers: { 'content-type': 'application/json' } });
+    if (u.includes('/products.json')) {
+      const page = Number(new URL(u).searchParams.get('page') ?? '1');
+      return new Response(page > 1 ? '{"products":[]}' : FIXTURE, { headers: { 'content-type': 'application/json' } });
+    }
+    return new Response('<html><title>Shop</title></html>', { headers: { 'content-type': 'text/html' } });
+  };
+
+  const alice = createWorkspace('Alice');
+  const bob = createWorkspace('Bob');
+
+  // BOTH tenants ingest the SAME storefront — the case that collides without
+  // tenancy, because the slug would be identical.
+  const a = await ingestStorefront('sharedshop.example', { fetchImpl: fetchImpl as never, workspaceId: alice.id });
+  const b = await ingestStorefront('sharedshop.example', { fetchImpl: fetchImpl as never, workspaceId: bob.id });
+
+  assert.notEqual(a.merchantId, b.merchantId, 'the same shop in two workspaces is two distinct records');
+  assert.notEqual(a.publicId, b.publicId, 'and two distinct MCP addresses');
+
+  // Each tenant sees exactly one shop: their own.
+  assert.deepEqual(listMerchants(alice.id).map((m) => m.id), [a.merchantId]);
+  assert.deepEqual(listMerchants(bob.id).map((m) => m.id), [b.merchantId]);
+
+  // Alice cannot reach Bob's shop by guessing the slug.
+  assert.equal(getMerchant('sharedshop-example', alice.id)!.id, a.merchantId);
+  assert.equal(getMerchant(b.merchantId, alice.id), null, 'another tenant’s shop is not reachable by id');
+
+  // The MCP address resolves to exactly one shop, unambiguously.
+  assert.equal(getMerchantForMcp(a.publicId)!.id, a.merchantId);
+  assert.equal(getMerchantForMcp(b.publicId)!.id, b.merchantId);
+  // The now-ambiguous slug resolves to neither, rather than guessing.
+  assert.equal(getMerchantForMcp('sharedshop-example'), null, 'an ambiguous slug must not pick a tenant at random');
+});
+
+test('TENANCY: the audit trail a tenant reads is its own, plus system events', async () => {
+  const { createWorkspace } = await import('./workspace.ts');
+  const { record, list } = await import('../audit/ledger.ts');
+
+  const alice = createWorkspace('Alice2');
+  const bob = createWorkspace('Bob2');
+
+  record({ actor: 'a', action: 'quote.created', subjectId: 'a1', outcome: 'ok', workspaceId: alice.id });
+  record({ actor: 'b', action: 'quote.created', subjectId: 'b1', outcome: 'ok', workspaceId: bob.id });
+  record({ actor: 'system', action: 'sandbox.reset', subjectId: null, outcome: 'ok' });
+
+  const aliceSees = list(50, alice.id).map((r) => r.subjectId);
+  assert.ok(aliceSees.includes('a1'), 'own entries');
+  assert.ok(!aliceSees.includes('b1'), 'never another tenant’s entries');
+  assert.ok(list(50, alice.id).some((r) => r.action === 'sandbox.reset'), 'system events are shared');
+});
+
+test('ROLES: a workspace only ever gets its own dashboard', async () => {
+  const { createWorkspace, setWorkspaceRole, getWorkspace } = await import('./workspace.ts');
+
+  const w = createWorkspace();
+  assert.equal(w.role, null, 'a new visitor has no dashboard until they say who they are');
+
+  assert.equal(setWorkspaceRole(w.id, 'nonsense' as never), null, 'an unknown role is refused');
+  assert.equal(getWorkspace(w.id)!.role, null, 'and nothing is assigned');
+
+  const merchant = setWorkspaceRole(w.id, 'merchant')!;
+  assert.equal(merchant.role, 'merchant');
+  assert.equal(getWorkspace(w.id)!.role, 'merchant', 'the role persists on the account, not in the page');
 });

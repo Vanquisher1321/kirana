@@ -12,6 +12,10 @@ export type Platform = 'shopify' | 'woocommerce' | 'jsonld' | 'html';
 export interface Merchant {
   id: string;
   slug: string;
+  /** Globally unique, unguessable. This is what an MCP URL carries. */
+  publicId: string;
+  /** The tenant this shop belongs to. Null for pre-tenancy rows. */
+  workspaceId: string | null;
   name: string;
   originUrl: string;
   platform: Platform;
@@ -58,9 +62,14 @@ export interface Variant {
   weightGrams?: number;
 }
 
-/** What an adapter returns before it is persisted. */
+/**
+ * What an adapter returns before it is persisted.
+ *
+ * Identity and tenancy are assigned at persistence, not by the adapter — an
+ * adapter reads a shop, it does not decide who owns the result.
+ */
 export interface IngestResult {
-  merchant: Omit<Merchant, 'id' | 'ingestedAt'>;
+  merchant: Omit<Merchant, 'id' | 'ingestedAt' | 'publicId' | 'workspaceId'>;
   products: Array<Omit<Product, 'id' | 'merchantId' | 'variants'> & {
     variants: Array<Omit<Variant, 'id' | 'productId'>>;
   }>;

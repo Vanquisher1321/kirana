@@ -1,9 +1,11 @@
 import { db, nowIso } from '../lib/db.ts';
 import { id } from '../lib/id.ts';
 import type { IngestResult, Merchant, Product, Variant } from '../types.ts';
+import { randomBytes } from 'node:crypto';
 
 export interface PersistSummary {
   merchantId: string;
+  publicId: string;
   runId: string;
   productCount: number;
   variantCount: number;
@@ -15,21 +17,32 @@ export interface PersistSummary {
  * rather than accumulating duplicates. Prices move; an agent must never be able
  * to find a stale row that a newer crawl already superseded.
  */
-export function persistIngest(result: IngestResult, durationMs: number, startedAt: string): PersistSummary {
+export function persistIngest(
+  result: IngestResult,
+  durationMs: number,
+  startedAt: string,
+  workspaceId: string | null = null,
+): PersistSummary {
   const { merchant, products, warnings, provenance } = result;
-  const existing = db.prepare('SELECT id FROM merchants WHERE slug = ?').get(merchant.slug) as { id?: string } | undefined;
+  // A slug is unique WITHIN a workspace, not globally: two tenants may both
+  // ingest the same shop and must not collide.
+  const existing = (workspaceId
+    ? db.prepare('SELECT id, public_id FROM merchants WHERE slug = ? AND workspace_id IS ?').get(merchant.slug, workspaceId)
+    : db.prepare('SELECT id, public_id FROM merchants WHERE slug = ? AND workspace_id IS NULL').get(merchant.slug)
+  ) as { id?: string; public_id?: string } | undefined;
   const merchantId = existing?.id ?? id('mch');
+  const publicId = existing?.public_id ?? `shp_${randomBytes(18).toString('base64url')}`;
   const replacedPrevious = Boolean(existing?.id);
 
   db.exec('BEGIN');
   try {
     if (replacedPrevious) {
-      db.prepare('UPDATE merchants SET name=?, origin_url=?, platform=?, currency=?, policies=?, ingested_at=? WHERE id=?')
-        .run(merchant.name, merchant.originUrl, merchant.platform, merchant.currency, JSON.stringify(merchant.policies), nowIso(), merchantId);
+      db.prepare('UPDATE merchants SET name=?, origin_url=?, platform=?, currency=?, policies=?, ingested_at=?, public_id=COALESCE(public_id, ?) WHERE id=?')
+        .run(merchant.name, merchant.originUrl, merchant.platform, merchant.currency, JSON.stringify(merchant.policies), nowIso(), publicId, merchantId);
       db.prepare('DELETE FROM products WHERE merchant_id = ?').run(merchantId);
     } else {
-      db.prepare('INSERT INTO merchants (id, slug, name, origin_url, platform, currency, policies, ingested_at) VALUES (?,?,?,?,?,?,?,?)')
-        .run(merchantId, merchant.slug, merchant.name, merchant.originUrl, merchant.platform, merchant.currency, JSON.stringify(merchant.policies), nowIso());
+      db.prepare('INSERT INTO merchants (id, slug, name, origin_url, platform, currency, policies, ingested_at, workspace_id, public_id) VALUES (?,?,?,?,?,?,?,?,?,?)')
+        .run(merchantId, merchant.slug, merchant.name, merchant.originUrl, merchant.platform, merchant.currency, JSON.stringify(merchant.policies), nowIso(), workspaceId, publicId);
     }
 
     const insProduct = db.prepare(
@@ -54,7 +67,7 @@ export function persistIngest(result: IngestResult, durationMs: number, startedA
       .run(runId, merchantId, provenance.adapter, provenance.usedLlm ? 1 : 0, JSON.stringify(provenance.sourceUrls), products.length, variantCount, JSON.stringify(warnings), Math.round(durationMs), startedAt, nowIso());
 
     db.exec('COMMIT');
-    return { merchantId, runId, productCount: products.length, variantCount, replacedPrevious };
+    return { merchantId, publicId, runId, productCount: products.length, variantCount, replacedPrevious };
   } catch (err) {
     db.exec('ROLLBACK');
     throw err;
@@ -64,6 +77,8 @@ export function persistIngest(result: IngestResult, durationMs: number, startedA
 function rowToMerchant(r: Record<string, unknown>): Merchant {
   return {
     id: String(r.id), slug: String(r.slug), name: String(r.name), originUrl: String(r.origin_url),
+    publicId: (r.public_id as string | null) ?? '',
+    workspaceId: (r.workspace_id as string | null) ?? null,
     platform: r.platform as Merchant['platform'], currency: String(r.currency),
     policies: JSON.parse(String(r.policies)), ingestedAt: String(r.ingested_at),
   };
@@ -93,13 +108,37 @@ function rowToProduct(r: Record<string, unknown>, variants: Variant[]): Product 
   };
 }
 
-export function listMerchants(): Merchant[] {
-  return (db.prepare('SELECT * FROM merchants ORDER BY ingested_at DESC').all() as Record<string, unknown>[]).map(rowToMerchant);
+/** Scoped to one workspace. Pass null for the cross-tenant platform view. */
+export function listMerchants(workspaceId?: string | null): Merchant[] {
+  const rows = workspaceId === undefined
+    ? db.prepare('SELECT * FROM merchants ORDER BY ingested_at DESC').all()
+    : db.prepare('SELECT * FROM merchants WHERE workspace_id IS ? ORDER BY ingested_at DESC').all(workspaceId);
+  return (rows as Record<string, unknown>[]).map(rowToMerchant);
 }
 
-export function getMerchant(idOrSlug: string): Merchant | null {
-  const r = db.prepare('SELECT * FROM merchants WHERE id = ? OR slug = ?').get(idOrSlug, idOrSlug) as Record<string, unknown> | undefined;
+/**
+ * Look a merchant up by id, public id, or slug.
+ *
+ * When a workspace is given the lookup is confined to it, so one tenant can
+ * never reach another's shop by guessing a slug. The public id is globally
+ * unique and unguessable, which is what makes an MCP URL safe to hand out.
+ */
+export function getMerchant(key: string, workspaceId?: string | null): Merchant | null {
+  const scoped = workspaceId !== undefined;
+  const r = (scoped
+    ? db.prepare('SELECT * FROM merchants WHERE (id = ? OR slug = ? OR public_id = ?) AND workspace_id IS ?').get(key, key, key, workspaceId)
+    : db.prepare('SELECT * FROM merchants WHERE id = ? OR slug = ? OR public_id = ?').get(key, key, key)
+  ) as Record<string, unknown> | undefined;
   return r ? rowToMerchant(r) : null;
+}
+
+/** Resolves the merchant behind an MCP URL segment. Public id first. */
+export function getMerchantForMcp(key: string): Merchant | null {
+  const byPublic = db.prepare('SELECT * FROM merchants WHERE public_id = ?').get(key) as Record<string, unknown> | undefined;
+  if (byPublic) return rowToMerchant(byPublic);
+  // Slug fallback keeps older links working, but only when it is unambiguous.
+  const bySlug = db.prepare('SELECT * FROM merchants WHERE slug = ?').all(key) as Record<string, unknown>[];
+  return bySlug.length === 1 ? rowToMerchant(bySlug[0]!) : null;
 }
 
 function variantsFor(productIds: string[]): Map<string, Variant[]> {

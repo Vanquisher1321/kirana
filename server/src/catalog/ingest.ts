@@ -42,7 +42,7 @@ export interface IngestReport extends PersistSummary {
 
 export async function ingestStorefront(
   rawOrigin: string,
-  opts: Partial<IngestOptions> & { fetchImpl?: FetchLike; guard?: boolean } = {},
+  opts: Partial<IngestOptions> & { fetchImpl?: FetchLike; guard?: boolean; workspaceId?: string | null } = {},
 ): Promise<IngestReport> {
   const origin = normaliseOrigin(rawOrigin);
   const fetchImpl = opts.fetchImpl ?? makeFetch();
@@ -91,7 +91,7 @@ export async function ingestStorefront(
 
   const result = await chosen.ingest(origin, fetchImpl, options);
   const durationMs = performance.now() - t0;
-  const summary = persistIngest(result, durationMs, startedAt);
+  const summary = persistIngest(result, durationMs, startedAt, opts.workspaceId ?? null);
 
   record({
     actor: 'console',
@@ -100,6 +100,7 @@ export async function ingestStorefront(
     outcome: 'ok',
     detail: {
       origin,
+      workspaceId: opts.workspaceId ?? null,
       adapter: chosen.platform,
       usedLlm: result.provenance.usedLlm,
       products: summary.productCount,

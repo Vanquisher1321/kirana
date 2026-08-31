@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { config } from './lib/config.ts';
 import { ingestStorefront, IngestError } from './catalog/ingest.ts';
-import { getMerchant, listMerchants, latestRun, searchCatalog } from './catalog/store.ts';
+import { getMerchant, getMerchantForMcp, listMerchants, latestRun, searchCatalog } from './catalog/store.ts';
 import { buildMcpServer } from './mcp/server.ts';
 import { list as auditList, verify as auditVerify, forSubject, record } from './audit/ledger.ts';
 import { formatInr } from './lib/money.ts';
@@ -12,7 +12,9 @@ import { listOrders, getOrder, settleOrder } from './checkout/checkout.ts';
 import { reconcile } from './checkout/reconcile.ts';
 import { listAgents, setAgentCaps, issueAgentKey, agentForKey, ensureAgent } from './checkout/agents.ts';
 import { secretEquals, rateLimit } from './lib/security.ts';
-import { KILL_SWITCH, engageKillSwitch, releaseKillSwitch } from './checkout/guard.ts';
+import { KILL_SWITCH, engageKillSwitch, releaseKillSwitch, killSwitchActive } from './checkout/guard.ts';
+import { enforceMerchantCap } from './lib/selfheal.ts';
+import { COOKIE, ROLES, cookieHeader, createWorkspace, getWorkspace, readCookie, setWorkspaceRole, touchWorkspace, type Role } from './lib/workspace.ts';
 import { circuitState } from './razorpay/client.ts';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -67,10 +69,35 @@ export function buildApp() {
     const route = request.routeOptions?.url ?? '';
 
     if (route.startsWith('/api/')) {
+      // Every visitor gets their own workspace, silently, the way any normal
+      // site issues a session. No signup, no friction — and no visitor ever
+      // sees another's shops, approvals or orders.
+      const existing = readCookie(request.headers.cookie, COOKIE);
+      let ws = existing ? getWorkspace(existing) : null;
+      if (!ws) {
+        ws = createWorkspace();
+        reply.header('set-cookie', cookieHeader(ws.id, Boolean(config.publicOrigin)));
+      } else {
+        touchWorkspace(ws.id);
+      }
+      const req = request as unknown as { workspaceId: string; workspaceRole: Role | null };
+      req.workspaceId = ws.id;
+      req.workspaceRole = ws.role;
+
       const header = String(request.headers.authorization ?? '');
       const presented = header.startsWith('Bearer ') ? header.slice(7) : String(request.headers['x-kirana-console'] ?? '');
+      const wantsPlatform = (request.query as { scope?: string } | undefined)?.scope === 'platform';
+
       // A sandbox is meant to be driven, not admired. Test credentials only.
       if (config.isDemo) return;
+
+      // Cross-tenant reads are privileged even though ordinary reads are open.
+      if (wantsPlatform && !secretEquals(presented, config.consoleToken)) {
+        return reply.code(401).send({
+          error: 'unauthorized',
+          message: 'The platform view reads across every workspace and needs the operator token.',
+        });
+      }
 
       if (secretEquals(presented, config.consoleToken)) return;
 
@@ -132,14 +159,74 @@ export function buildApp() {
     }
   });
 
+  /** The tenant behind this request. */
+  const ws = (request: { workspaceId?: string }) => (request as { workspaceId?: string }).workspaceId ?? null;
+
+  /**
+   * Scope for a read.
+   *
+   * The Razorpay persona is the one view that legitimately reads ACROSS
+   * tenants — that is what a platform console is. Everything else is confined
+   * to the caller's own workspace. `undefined` means "every tenant"; a string
+   * means "this one".
+   *
+   * On the public sandbox this is open, and the banner says so. A real
+   * deployment runs KIRANA_ACCESS=locked, where reaching it needs the operator
+   * token like every other privileged action.
+   */
+  const scopeFor = (request: { workspaceId?: string; workspaceRole?: Role | null; query?: unknown }): string | null | undefined => {
+    const wantsAll = (request.query as { scope?: string } | undefined)?.scope === 'platform';
+    // Asking is not enough — the workspace must actually BE the platform.
+    return wantsAll && request.workspaceRole === 'platform' ? undefined : ws(request);
+  };
+
+  // -------------------------------------------------------------------------
+  // Session. Who is this visitor, and which dashboard is theirs?
+  // -------------------------------------------------------------------------
+
+  app.get('/api/session', async (request) => {
+    const r = request as unknown as { workspaceId: string; workspaceRole: Role | null };
+    return {
+      workspaceId: r.workspaceId,
+      role: r.workspaceRole,
+      // Switching roles is a DEMO capability, plainly labelled as one. On a real
+      // deployment your role is a property of your account and does not change
+      // because you clicked something.
+      canSwitchRole: config.isDemo,
+    };
+  });
+
+  app.post('/api/session/role', async (request, reply) => {
+    const r = request as unknown as { workspaceId: string; workspaceRole: Role | null };
+    const wanted = (request.body as { role?: string } | undefined)?.role ?? '';
+    if (!(ROLES as string[]).includes(wanted)) {
+      return reply.code(400).send({ error: 'bad_role', message: `Role must be one of ${ROLES.join(', ')}.` });
+    }
+    if (r.workspaceRole && !config.isDemo) {
+      return reply.code(409).send({
+        error: 'role_fixed',
+        message: 'Your role is part of your account and cannot be changed here.',
+      });
+    }
+    const updated = setWorkspaceRole(r.workspaceId, wanted as Role);
+    record({
+      actor: `workspace:${r.workspaceId}`,
+      action: r.workspaceRole ? 'session.role_switched' : 'session.role_chosen',
+      subjectId: r.workspaceId, outcome: 'ok',
+      detail: { from: r.workspaceRole, to: wanted, demo: config.isDemo },
+      workspaceId: r.workspaceId,
+    });
+    return updated;
+  });
+
   app.get('/health', async () => ({ ok: true, service: 'kirana', razorpay: config.razorpay.configured }));
 
   // ---------------------------------------------------------------------------
   // Console API
   // ---------------------------------------------------------------------------
 
-  app.get('/api/merchants', async () =>
-    listMerchants().map((m) => {
+  app.get('/api/merchants', async (request) =>
+    listMerchants(scopeFor(request as never)).map((m) => {
       const run = latestRun(m.id);
       return {
         ...m,
@@ -163,12 +250,13 @@ export function buildApp() {
       return reply.code(429).send({ error: 'rate_limited', message: `Too many ingestions. Retry in ${Math.ceil(limited.retryAfterMs / 1000)}s.` });
     }
     try {
-      const report = await ingestStorefront(body.url);
+      const report = await ingestStorefront(body.url, { workspaceId: ws(request as never) });
+      enforceMerchantCap();
       const merchant = getMerchant(report.merchantId)!;
       return {
         ...report,
         merchant,
-        mcpUrl: `${config.publicOrigin || `http://localhost:${config.port}`}/mcp/${merchant.slug}`,
+        mcpUrl: `${config.publicOrigin || `http://localhost:${config.port}`}/mcp/${merchant.publicId || merchant.slug}`,
       };
     } catch (err) {
       if (err instanceof IngestError) return reply.code(422).send({ error: err.message, origin: err.origin });
@@ -179,7 +267,7 @@ export function buildApp() {
 
   app.get('/api/merchants/:slug/products', async (request, reply) => {
     const { slug } = request.params as { slug: string };
-    const m = getMerchant(slug);
+    const m = getMerchant(slug, ws(request as never));
     if (!m) return reply.code(404).send({ error: 'merchant not found' });
     const q = (request.query as { q?: string }).q;
     return searchCatalog(m.id, { query: q, limit: 100 }).map((p) => ({
@@ -190,7 +278,7 @@ export function buildApp() {
 
   app.get('/api/audit', async (request) => {
     const { subject, limit } = request.query as { subject?: string; limit?: string };
-    return subject ? forSubject(subject) : auditList(Number(limit ?? 200));
+    return subject ? forSubject(subject) : auditList(Number(limit ?? 200), scopeFor(request as never));
   });
 
   app.get('/api/audit/verify', async () => auditVerify());
@@ -252,8 +340,8 @@ export function buildApp() {
   // Orders, agents, and the stop button.
   // -------------------------------------------------------------------------
 
-  app.get('/api/orders', async () =>
-    listOrders(100).map((o) => ({
+  app.get('/api/orders', async (request) =>
+    listOrders(100, scopeFor(request as never)).map((o) => ({
       id: String(o.id), status: String(o.status),
       amount: formatInr(Number(o.amount_minor)), amountMinor: Number(o.amount_minor),
       currency: String(o.currency),
@@ -272,8 +360,8 @@ export function buildApp() {
     return { ...o, amountFormatted: formatInr(Number(o.amount_minor)), audit: forSubject(id) };
   });
 
-  app.get('/api/agents', async () =>
-    listAgents().map((a) => ({ ...a, perOrderCap: formatInr(a.perOrderCapMinor), dailyCap: formatInr(a.dailyCapMinor) })),
+  app.get('/api/agents', async (request) =>
+    listAgents(scopeFor(request as never)).map((a) => ({ ...a, perOrderCap: formatInr(a.perOrderCapMinor), dailyCap: formatInr(a.dailyCapMinor) })),
   );
 
   app.post('/api/agents/:id/caps', async (request, reply) => {
@@ -310,14 +398,20 @@ export function buildApp() {
 
   app.get('/api/system', async () => ({
     demo: config.isDemo,
-    killSwitch: { engaged: KILL_SWITCH.engaged, reason: KILL_SWITCH.reason },
+    killSwitch: {
+      engaged: killSwitchActive(),
+      reason: KILL_SWITCH.reason,
+      releasesAt: KILL_SWITCH.releasesAt ? new Date(KILL_SWITCH.releasesAt).toISOString() : null,
+    },
     gateway: circuitState(),
     razorpay: { configured: config.razorpay.configured, mode: 'test' },
   }));
 
   app.post('/api/system/kill-switch', async (request) => {
     const b = request.body as { engage?: boolean; reason?: string };
-    if (b.engage) engageKillSwitch(b.reason ?? 'stopped from the console');
+    // On the sandbox the stop button releases itself, so it can be demonstrated
+    // without one visitor freezing the demo for everyone after them.
+    if (b.engage) engageKillSwitch(b.reason ?? 'stopped from the console', config.isDemo ? config.demoKillSwitchMinutes * 60_000 : 0);
     else releaseKillSwitch();
     record({
       actor: 'human:console',
@@ -410,7 +504,7 @@ export function buildApp() {
 
   app.all('/mcp/:slug', async (request, reply) => {
     const { slug } = request.params as { slug: string };
-    const merchant = getMerchant(slug);
+    const merchant = getMerchantForMcp(slug);
     if (!merchant) {
       return reply.code(404).send({
         jsonrpc: '2.0',
@@ -431,7 +525,7 @@ export function buildApp() {
     const identityProven = (request as unknown as { identityProven?: boolean }).identityProven === true;
     // Register on FIRST CONTACT, not on first purchase. An agent that has only
     // browsed is still an agent the merchant should be able to see and cap.
-    ensureAgent(agentId);
+    ensureAgent(agentId, undefined, merchant.workspaceId);
     const server = buildMcpServer(merchant, agentId, identityProven);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 

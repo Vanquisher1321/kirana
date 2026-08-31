@@ -44,14 +44,61 @@ const BLOCKED_V4: Array<[string, number, string]> = [
   ['169.254.0.0', 16, 'link-local / cloud metadata'],
   ['172.16.0.0', 12, 'private network'],
   ['192.0.0.0', 24, 'IETF protocol assignments'],
+  ['192.88.99.0', 24, '6to4 relay anycast'],
   ['192.168.0.0', 16, 'private network'],
   ['198.18.0.0', 15, 'benchmarking'],
   ['224.0.0.0', 4, 'multicast'],
   ['240.0.0.0', 4, 'reserved'],
 ];
 
+/**
+ * Expands any IPv6 literal to its 16 bytes, handling `::` compression and a
+ * trailing dotted-quad. Returns null if it is not parseable as IPv6.
+ *
+ * This replaced a regex that only recognised the DOTTED form of an
+ * IPv4-mapped address (`::ffff:127.0.0.1`). The WHATWG URL parser normalises
+ * `[0:0:0:0:0:ffff:169.254.169.254]` to `[::ffff:a9fe:a9fe]` -- the same
+ * address in hex -- which that regex did not match, so the cloud metadata
+ * endpoint was reachable through a redirect. Parse the address; do not pattern
+ * match its spelling.
+ */
+function ipv6Bytes(input: string): Uint8Array | null {
+  let addr = input.trim().replace(/^\[|\]$/g, '').split('%')[0]!;
+  if (!addr.includes(':')) return null;
+
+  // A trailing dotted quad becomes two hex groups.
+  const dotted = addr.match(/(.*:)(\d+\.\d+\.\d+\.\d+)$/);
+  if (dotted) {
+    const quad = dotted[2]!.split('.').map(Number);
+    if (quad.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+    const hi = ((quad[0]! << 8) | quad[1]!).toString(16);
+    const lo = ((quad[2]! << 8) | quad[3]!).toString(16);
+    addr = `${dotted[1]}${hi}:${lo}`;
+  }
+
+  const halves = addr.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0]!.split(':').filter((x) => x !== '') : [];
+  const tail = halves.length === 2 ? (halves[1] ? halves[1]!.split(':').filter((x) => x !== '') : []) : [];
+  const groups = halves.length === 2
+    ? [...head, ...Array(8 - head.length - tail.length).fill('0'), ...tail]
+    : head;
+  if (groups.length !== 8) return null;
+
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 8; i++) {
+    const g = groups[i]!;
+    if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return null;
+    const v = parseInt(g, 16);
+    bytes[i * 2] = v >> 8;
+    bytes[i * 2 + 1] = v & 0xff;
+  }
+  return bytes;
+}
+
 export function classifyAddress(addr: string): string | null {
-  const family = isIP(addr);
+  const family = isIP(addr.replace(/^\[|\]$/g, ''));
+
   if (family === 4) {
     const v = ipv4ToInt(addr);
     for (const [base, bits, why] of BLOCKED_V4) {
@@ -60,16 +107,33 @@ export function classifyAddress(addr: string): string | null {
     }
     return null;
   }
+
   if (family === 6) {
-    const a = addr.toLowerCase().replace(/^\[|\]$/g, '');
-    if (a === '::1' || a === '::') return 'loopback';
-    if (a.startsWith('fe80')) return 'link-local';
-    if (a.startsWith('fc') || a.startsWith('fd')) return 'unique local';
-    // IPv4-mapped (::ffff:127.0.0.1) is IPv4 wearing a hat.
-    const mapped = a.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    if (mapped) return classifyAddress(mapped[1]!);
+    const b = ipv6Bytes(addr);
+    if (!b) return 'unparseable IPv6 address';
+
+    const allZero = b.every((x) => x === 0);
+    if (allZero) return 'unspecified';
+    if (b.slice(0, 15).every((x) => x === 0) && b[15] === 1) return 'loopback';
+
+    // IPv4-mapped (::ffff:0:0/96) and IPv4-compatible: judge the embedded IPv4,
+    // whichever spelling it arrived in.
+    const first10Zero = b.slice(0, 10).every((x) => x === 0);
+    if (first10Zero && b[10] === 0xff && b[11] === 0xff) {
+      return classifyAddress(`${b[12]}.${b[13]}.${b[14]}.${b[15]}`);
+    }
+    // NAT64 well-known prefix 64:ff9b::/96 also embeds an IPv4 address.
+    if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b
+        && b.slice(4, 12).every((x) => x === 0)) {
+      return classifyAddress(`${b[12]}.${b[13]}.${b[14]}.${b[15]}`) ?? 'NAT64 translation prefix';
+    }
+
+    if ((b[0]! & 0xfe) === 0xfc) return 'unique local';
+    if (b[0] === 0xfe && (b[1]! & 0xc0) === 0x80) return 'link-local';
+    if (b[0] === 0xff) return 'multicast';
     return null;
   }
+
   return 'not an IP address';
 }
 

@@ -1,11 +1,15 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 
-process.env.KIRANA_DB = `data/test-webhook-${process.pid}.db`;
+// A temp file, not the working tree: test artefacts in a mounted repo
+// become undeletable locks that fail the NEXT run with a bare disk I/O error.
+process.env.KIRANA_DB = join(tmpdir(), `kirana-test-webhook-${process.pid}-${Date.now()}.db`);
 process.env.KIRANA_SIGNING_SECRET = 'd'.repeat(64);
 process.env.KIRANA_QUIET = '1';
 process.env.KIRANA_CONSOLE_TOKEN = 'test-console-token';

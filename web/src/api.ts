@@ -1,5 +1,6 @@
 export interface Merchant {
-  id: string; slug: string; name: string; originUrl: string; platform: string;
+  id: string; slug: string; publicId: string; workspaceId: string | null;
+  name: string; originUrl: string; platform: string;
   currency: string; ingestedAt: string; products: number; variants: number;
   adapter: string | null; usedLlm: boolean; warnings: string[]; durationMs: number; mcpUrl: string;
 }
@@ -28,6 +29,13 @@ export interface SystemState {
   gateway: { open: boolean; failures: number; openUntil: string | null };
   razorpay: { configured: boolean; mode: string };
 }
+export type Role = 'merchant' | 'shopper' | 'platform';
+export interface Session {
+  workspaceId: string;
+  role: Role | null;
+  canSwitchRole: boolean;
+}
+
 export interface Verification { ok: boolean; checked: number; brokenAtSeq?: number; reason?: string; }
 
 /**
@@ -54,6 +62,9 @@ export class Unauthorized extends Error {
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
+    // Same-origin by default, so the workspace cookie rides along and each
+    // visitor sees only their own shops, approvals and orders.
+    credentials: 'same-origin',
     headers: {
       'content-type': 'application/json',
       authorization: `Bearer ${getToken()}`,
@@ -67,18 +78,24 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+/** `platform` reads across every workspace; anything else is this visitor's own. */
+export type Scope = 'mine' | 'platform';
+const q = (scope: Scope) => (scope === 'platform' ? '?scope=platform' : '');
+
 export const api = {
-  merchants: () => req<Merchant[]>('/api/merchants'),
+  merchants: (scope: Scope = 'mine') => req<Merchant[]>(`/api/merchants${q(scope)}`),
   ingest: (url: string) => req<{ merchant: Merchant; productCount: number; variantCount: number; adapter: string; usedLlm: boolean; warnings: string[]; durationMs: number; mcpUrl: string }>(
     '/api/ingest', { method: 'POST', body: JSON.stringify({ url }) }),
   approvals: () => req<Approval[]>('/api/approvals'),
   approve: (id: string) => req<Approval>(`/api/approvals/${id}/approve`, { method: 'POST', body: JSON.stringify({ by: 'om' }) }),
   reject: (id: string) => req<Approval>(`/api/approvals/${id}/reject`, { method: 'POST', body: JSON.stringify({ by: 'om' }) }),
-  audit: (limit = 60) => req<AuditRow[]>(`/api/audit?limit=${limit}`),
+  audit: (limit = 60, scope: Scope = 'mine') => req<AuditRow[]>(`/api/audit?limit=${limit}${scope === 'platform' ? '&scope=platform' : ''}`),
   verify: () => req<Verification>('/api/audit/verify'),
-  orders: () => req<Order[]>('/api/orders'),
-  agents: () => req<Agent[]>('/api/agents'),
+  orders: (scope: Scope = 'mine') => req<Order[]>(`/api/orders${q(scope)}`),
+  agents: (scope: Scope = 'mine') => req<Agent[]>(`/api/agents${q(scope)}`),
   system: () => req<SystemState>('/api/system'),
+  session: () => req<Session>('/api/session'),
+  chooseRole: (role: Role) => req<{ role: Role }>('/api/session/role', { method: 'POST', body: JSON.stringify({ role }) }),
   issueKey: (agentId: string, label?: string) =>
     req<{ apiKey: string; agent: Agent; note: string }>(`/api/agents/${agentId}/key`, {
       method: 'POST', body: JSON.stringify({ label }),

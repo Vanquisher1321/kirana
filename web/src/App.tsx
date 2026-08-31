@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   api, getToken, setToken, clearToken, Unauthorized,
-  type Agent, type Approval, type AuditRow, type Merchant, type Order, type SystemState, type Verification,
+  type Agent, type Approval, type AuditRow, type Merchant, type Order, type Session, type SystemState, type Verification,
 } from './api.ts';
 import Merchant_ from './personas/Merchant.tsx';
 import Shopper from './personas/Shopper.tsx';
@@ -47,7 +47,9 @@ const NAV: Record<Persona, Array<[string, string] | ['div', '']>> = {
 const FIRST: Record<Persona, string> = { merchant: 'overview', shopper: 'home', platform: 'overview' };
 
 export default function App() {
+  const [session, setSession] = useState<Session | null>(null);
   const [persona, setPersona] = useState<Persona>('merchant');
+  const personaRef = useRef<Persona>('merchant');
   const [page, setPage] = useState('overview');
   const [data, setData] = useState<Data>({ loaded: false, merchants: [], approvals: [], audit: [], orders: [], agents: [], system: null, seal: null });
   const [locked, setLocked] = useState(false);
@@ -57,8 +59,11 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     try {
+      // The Razorpay persona reads across every workspace; the merchant and
+      // shopper views are confined to this visitor's own.
+      const scope = personaRef.current === 'platform' ? 'platform' : 'mine';
       const [merchants, approvals, audit, orders, agents, system, seal] = await Promise.all([
-        api.merchants(), api.approvals(), api.audit(), api.orders(), api.agents(), api.system(), api.verify(),
+        api.merchants(scope), api.approvals(), api.audit(60, scope), api.orders(scope), api.agents(scope), api.system(), api.verify(),
       ]);
       setData({ loaded: true, merchants, approvals, audit, orders, agents, system, seal });
       setErr(''); setLocked(false);
@@ -69,14 +74,43 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    void (async () => {
+      try {
+        const s = await api.session();
+        setSession(s);
+        if (s.role) { personaRef.current = s.role; setPersona(s.role); setPage(FIRST[s.role]); }
+      } catch { /* handled by refresh */ }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!session?.role) return;
     void refresh();
     const t = setInterval(() => void refresh(), 3000);
     return () => clearInterval(t);
-  }, [refresh]);
+  }, [refresh, session?.role]);
 
-  function go(p: Persona) { setPersona(p); setPage(FIRST[p]); }
+  function go(p: Persona) {
+    personaRef.current = p;
+    setPersona(p);
+    setPage(FIRST[p]);
+    void refresh();
+  }
 
   if (locked) return <Unlock onUnlocked={() => { setLocked(false); void refresh(); }} />;
+
+  // Until a visitor says who they are, there is no dashboard to show. A
+  // merchant does not get a platform console and a shopper does not get a
+  // merchant one — role is a property of the account, not a tab.
+  if (session && !session.role) {
+    return <ChooseRole onChosen={async (r) => {
+      await api.chooseRole(r);
+      const s = await api.session();
+      setSession(s);
+      personaRef.current = r; setPersona(r); setPage(FIRST[r]);
+      void refresh();
+    }} />;
+  }
 
   const demo = Boolean(data.system?.demo);
   const watching = !demo && !getToken();
@@ -102,13 +136,21 @@ export default function App() {
           <div className="brandsub">Make any merchant AI-buyable</div>
         </div>
 
-        <div className="personas" role="tablist">
-          {(['merchant', 'shopper', 'platform'] as Persona[]).map((p) => (
-            <button key={p} role="tab" className="persona" aria-selected={persona === p} onClick={() => go(p)}>
-              {p === 'platform' ? 'Razorpay' : p[0]!.toUpperCase() + p.slice(1)}
-            </button>
-          ))}
-        </div>
+        {session?.canSwitchRole ? (
+          <div className="personas" role="tablist" title="Demo only — on a real account your role is fixed">
+            <span className="demoswitch">Viewing as</span>
+            {(['merchant', 'shopper', 'platform'] as Persona[]).map((p) => (
+              <button key={p} role="tab" className="persona" aria-selected={persona === p}
+                onClick={() => { void api.chooseRole(p).catch(() => {}); go(p); }}>
+                {p === 'platform' ? 'Razorpay' : p[0]!.toUpperCase() + p.slice(1)}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span className="rolechip">
+            {persona === 'platform' ? 'Razorpay · platform' : persona === 'merchant' ? 'Merchant' : 'Shopper'}
+          </span>
+        )}
 
         <div style={{ flex: 1 }} />
 
@@ -213,6 +255,51 @@ export default function App() {
           </div>
         </main>
       </div>
+    </div>
+  );
+}
+
+function ChooseRole({ onChosen }: { onChosen: (r: Persona) => Promise<void> }) {
+  const [busy, setBusy] = useState('');
+  const options: Array<[Persona, string, string]> = [
+    ['merchant', 'I run a shop', 'Make your storefront buyable by AI assistants, decide which ones you trust, and see what they bought.'],
+    ['shopper', 'I have an AI assistant', 'Approve or decline what it wants to spend, set your limits, and see everything it did.'],
+    ['platform', 'I work at Razorpay', 'Merchants onboarded, transactions across every workspace, and what the guards stopped.'],
+  ];
+  return (
+    <div className="app">
+      <header className="topbar">
+        <div className="row" style={{ gap: 10 }}>
+          <div className="mark">K</div>
+          <div className="brandname">Kirana</div>
+          <div className="brandsub">Make any merchant AI-buyable</div>
+        </div>
+      </header>
+      <div className="body skin-merchant">
+        <main className="main">
+          <div className="page narrow">
+            <PageHeadLite title="Who are you here as?" sub="This decides which console you get. You can only see your own." />
+            <div style={{ display: 'grid', gap: 12 }}>
+              {options.map(([key, title, blurb]) => (
+                <button key={key} className="rolecard" disabled={Boolean(busy)}
+                  onClick={() => { setBusy(key); void onChosen(key).finally(() => setBusy('')); }}>
+                  <div className="h2">{title}{busy === key && <span className="spin" style={{ marginLeft: 10 }} />}</div>
+                  <div className="sub" style={{ margin: '4px 0 0' }}>{blurb}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function PageHeadLite({ title, sub }: { title: string; sub: string }) {
+  return (
+    <div style={{ marginBottom: 22 }}>
+      <div className="h1 big">{title}</div>
+      <div className="sub">{sub}</div>
     </div>
   );
 }

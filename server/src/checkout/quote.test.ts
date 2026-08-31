@@ -1,8 +1,12 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 
-process.env.KIRANA_DB = `data/test-quote-${process.pid}.db`;
+// A temp file, not the working tree: test artefacts in a mounted repo
+// become undeletable locks that fail the NEXT run with a bare disk I/O error.
+process.env.KIRANA_DB = join(tmpdir(), `kirana-test-quote-${process.pid}-${Date.now()}.db`);
 process.env.KIRANA_SIGNING_SECRET = 'a'.repeat(64);
 
 const { ingestStorefront } = await import('../catalog/ingest.ts');

@@ -1,7 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-process.env.KIRANA_DB = `data/test-ledger-${process.pid}.db`;
+// A temp file, not the working tree: test artefacts in a mounted repo
+// become undeletable locks that fail the NEXT run with a bare disk I/O error.
+process.env.KIRANA_DB = join(tmpdir(), `kirana-test-ledger-${process.pid}-${Date.now()}.db`);
 const { record, verify, list, forSubject } = await import('./ledger.ts');
 const { db } = await import('../lib/db.ts');
 

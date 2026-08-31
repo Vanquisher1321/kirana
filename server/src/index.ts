@@ -3,6 +3,7 @@ import { config, describeConfig } from './lib/config.ts';
 import { listMerchants } from './catalog/store.ts';
 import { startReconciler } from './checkout/reconcile.ts';
 import { seedDemoStore } from './cli/seed.ts';
+import { startSelfHealing } from './lib/selfheal.ts';
 
 const app = buildApp();
 
@@ -25,6 +26,10 @@ try {
   const merchants = listMerchants();
   app.log.info(`merchants ingested  ${merchants.length}`);
   for (const m of merchants) app.log.info(`  ${m.name} -> ${base}/mcp/${m.slug}`);
+  if (config.isDemo) {
+    startSelfHealing(seedDemoStore);
+    app.log.info(`sandbox self-heal   on — the demo repairs itself so no visitor can leave it broken`);
+  }
   if (config.razorpay.configured) {
     startReconciler();
     app.log.info('reconciler          sweeping unsettled orders every 20s (webhooks optional)');
