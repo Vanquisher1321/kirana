@@ -36,7 +36,55 @@ export interface AuditRow {
 
 interface HashInput {
   ts: string; actor: string; action: string; subjectId: string | null;
-  outcome: string; detail: string; prevHash: string;
+  outcome: string; detail: string; prevHash: string; workspaceId: string | null;
+}
+
+/**
+ * A workspace id is a BEARER TOKEN -- it is the whole content of the session
+ * cookie, so anyone who reads one becomes that visitor. It must never reach a
+ * field that another tenant can read back.
+ *
+ * Two call sites used to interpolate it into `actor` and into `detail`, and
+ * because unowned rows were shown to everybody, `GET /api/audit` handed out
+ * other people's sessions. Rather than fixing those two sites and trusting the
+ * next thirty, every value written here is scrubbed: an id becomes a short
+ * one-way reference that is stable, readable in the console, and useless as a
+ * credential.
+ */
+const WS_TOKEN = /ws_[A-Za-z0-9_-]{16,}/g;
+
+export function workspaceRef(id: string): string {
+  return `ws:${createHash('sha256').update(id).digest('hex').slice(0, 8)}`;
+}
+
+const scrub = (text: string): string => text.replace(WS_TOKEN, (m) => workspaceRef(m));
+
+/**
+ * Which tenant does this row belong to?
+ *
+ * Derived from the subject rather than passed in by each of the thirty-odd
+ * call sites, because attribution that can be forgotten will be forgotten --
+ * and a row that forgets is a row every tenant can read.
+ */
+function workspaceForSubject(subjectId: string | null): string | null {
+  if (!subjectId) return null;
+  const q = (sql: string): string | null => {
+    const r = db.prepare(sql).get(subjectId) as { ws?: string | null } | undefined;
+    return (r?.ws as string | null) ?? null;
+  };
+  if (subjectId.startsWith('mch_')) return q('SELECT workspace_id AS ws FROM merchants WHERE id = ?');
+  if (subjectId.startsWith('qte_')) {
+    return q(`SELECT m.workspace_id AS ws FROM quotes q JOIN merchants m ON m.id = q.merchant_id WHERE q.id = ?`);
+  }
+  if (subjectId.startsWith('csnt_')) {
+    return q(`SELECT m.workspace_id AS ws FROM consents c
+              JOIN quotes q ON q.id = c.quote_id
+              JOIN merchants m ON m.id = q.merchant_id WHERE c.id = ?`);
+  }
+  if (subjectId.startsWith('ord_')) {
+    return q(`SELECT m.workspace_id AS ws FROM orders o JOIN merchants m ON m.id = o.merchant_id WHERE o.id = ?`);
+  }
+  return null;
 }
 
 /**
@@ -48,7 +96,9 @@ interface HashInput {
  * makes the encoding unambiguous.
  */
 function computeHash(i: HashInput): string {
-  const parts = [i.prevHash, i.ts, i.actor, i.action, i.subjectId ?? '', i.outcome, i.detail];
+  // workspace_id is inside the hash: leaving it out would let the tenancy
+  // column be rewritten row by row while verify() still reported "ok".
+  const parts = [i.prevHash, i.ts, i.actor, i.action, i.subjectId ?? '', i.outcome, i.detail, i.workspaceId ?? ''];
   const encoded = parts.map((p) => `${Buffer.byteLength(p, 'utf8')}:${p}`).join('');
   return createHash('sha256').update(encoded, 'utf8').digest('hex');
 }
@@ -63,10 +113,17 @@ export function record(entry: AuditEntry): string {
   const prev = lastStmt.get() as { hash?: string } | undefined;
   const prevHash = prev?.hash ?? GENESIS;
   const ts = nowIso();
-  const detail = JSON.stringify(entry.detail ?? {});
+  const actor = scrub(entry.actor);
+  const detail = scrub(JSON.stringify(entry.detail ?? {}));
   const subjectId = entry.subjectId ?? null;
-  const hash = computeHash({ ts, actor: entry.actor, action: entry.action, subjectId, outcome: entry.outcome, detail, prevHash });
-  insertStmt.run(ts, entry.actor, entry.action, subjectId, entry.outcome, detail, prevHash, hash, entry.workspaceId ?? null);
+  // Explicit attribution wins; otherwise derive it from the subject. A row that
+  // belongs to nobody is a genuine system event and only the platform view
+  // reads those.
+  const workspaceId = entry.workspaceId ?? workspaceForSubject(subjectId);
+  const hash = computeHash({
+    ts, actor, action: entry.action, subjectId, outcome: entry.outcome, detail, prevHash, workspaceId,
+  });
+  insertStmt.run(ts, actor, entry.action, subjectId, entry.outcome, detail, prevHash, hash, workspaceId);
   return hash;
 }
 
@@ -84,9 +141,13 @@ function toRow(r: Record<string, unknown>): AuditRow {
  * plus system events that belong to nobody.
  */
 export function list(limit = 200, workspaceId?: string | null): AuditRow[] {
+  // `OR workspace_id IS NULL` used to be here, to keep system events visible.
+  // It meant every unattributed row -- which was most of them -- was readable
+  // by every tenant, so one visitor could read another's orders, quotes and
+  // approvals straight out of the feed. Unowned rows are the platform's.
   const rows = workspaceId === undefined
     ? db.prepare('SELECT * FROM audit_log ORDER BY seq DESC LIMIT ?').all(limit)
-    : db.prepare('SELECT * FROM audit_log WHERE workspace_id IS ? OR workspace_id IS NULL ORDER BY seq DESC LIMIT ?').all(workspaceId, limit);
+    : db.prepare('SELECT * FROM audit_log WHERE workspace_id IS ? ORDER BY seq DESC LIMIT ?').all(workspaceId, limit);
   return (rows as Record<string, unknown>[]).map(toRow);
 }
 
@@ -119,7 +180,7 @@ export function verify(): VerifyResult {
     const expected = computeHash({
       ts: String(r.ts), actor: String(r.actor), action: String(r.action),
       subjectId: (r.subject_id as string | null) ?? null, outcome: String(r.outcome),
-      detail: String(r.detail), prevHash,
+      detail: String(r.detail), prevHash, workspaceId: (r.workspace_id as string | null) ?? null,
     });
     if (expected !== String(r.hash)) {
       return { ok: false, checked: rows.length, brokenAtSeq: Number(r.seq), reason: 'row hash does not match its contents (the row was edited after it was written)' };

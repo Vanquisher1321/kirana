@@ -393,3 +393,29 @@ test('SECURITY: a self-asserted agent name cannot inherit a verified agent’s r
   });
   assert.equal(allowed.allowed, true, `a proven identity should pass: ${allowed.reason}`);
 });
+
+test('LOCKED MODE: a first-time visitor can still choose their dashboard', async () => {
+  // /api/session/* is a POST, and locked mode refused every unauthenticated
+  // POST -- so the onboarding screen 401'd and nobody without the operator
+  // token could ever get a dashboard. These routes only write to the caller's
+  // own workspace; they are not in the same class as approving a spend.
+  const res = await fetch(`${base}/api/session/role`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'merchant' }),
+  });
+  assert.equal(res.status, 200, 'onboarding must work without an operator token');
+  assert.equal((await res.json() as { role: string }).role, 'merchant');
+
+  // Reviewer mode is still refused off the sandbox, in its own handler.
+  const reviewer = await fetch(`${base}/api/session/full-access`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: true }),
+  });
+  assert.equal(reviewer.status, 403);
+
+  // And the things that DO need the token still need it.
+  const approve = await fetch(`${base}/api/system/kill-switch`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ engage: true }),
+  });
+  // 429 rather than 401 only means earlier tests in this file already spent
+  // the failed-auth budget for this address. Either way it is refused.
+  assert.ok([401, 429].includes(approve.status), `pausing the system is still privileged, got ${approve.status}`);
+});

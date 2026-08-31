@@ -180,6 +180,99 @@ deploy secret is running the instance, not visiting it; requiring them to append
 `?scope=platform` to every call would answer `200` with an empty list and look
 exactly like data loss.
 
+### Reading across tenants and acting across tenants are different powers
+
+On the sandbox any visitor may hand themselves the Razorpay persona or reviewer
+mode — one unauthenticated POST each, deliberately, because a judge needs to see
+all three consoles on a test-mode instance.
+
+The same predicate used to guard *acting*, so two requests turned a stranger
+into someone who could approve, reject or revoke another visitor's spending. The
+human-in-the-loop guarantee belonged to whoever asked for it last.
+
+Now only the operator token — the deploy secret, which no visitor has — may act
+across tenants. A self-selected role widens the view and nothing else.
+
+### A workspace id is a bearer token and never appears in readable content
+
+The workspace id *is* the session cookie: anyone who reads one becomes that
+visitor. Two audit call sites interpolated it into `actor` and `detail`, and the
+feed showed unattributed rows to every tenant — so `GET /api/audit` returned a
+list of other people's sessions, no token required, in locked mode too.
+
+Three changes, because one would not have held:
+
+- Attribution is **derived from the subject**, not passed in by each of the
+  thirty-odd call sites. Attribution that can be forgotten will be forgotten,
+  and a row that forgets is a row every tenant can read.
+- Unowned rows are the platform's, not everyone's. `list()` no longer returns
+  `workspace_id IS NULL` to a tenant.
+- Every value written to the log is **scrubbed**: a workspace id becomes
+  `ws:<8 hex>`, a stable one-way reference that keeps rows attributable in the
+  console and is useless as a credential.
+
+`workspace_id` is also inside the row hash now, so the tenancy column cannot be
+rewritten row by row while `verify()` still reports `ok`.
+
+### One approval funds exactly one order, even under concurrency
+
+Every single-use guarantee here was enforced by reading a status in the guard
+and writing it *after* the gateway call — with two awaited network round-trips
+in between. Node hands the event loop to every other in-flight request inside
+that window, so N callers all read `open`, all passed every gate, and all got an
+order: one human approval, N payable links, each cap satisfied individually and
+none in aggregate. Measured: ten concurrent calls on one ₹2,000 approval
+produced **ten** orders.
+
+The check and the write are now the same statement —
+`UPDATE quotes SET status='consumed' WHERE id=? AND status='open'` — and the
+same for the consent, both before the gateway is touched. Ten concurrent calls
+now produce one order and nine refusals.
+
+On a gateway failure the approval is handed back **only** when nothing can have
+been created: the breaker refused to send, or Razorpay answered with a definite
+non-retryable error. A timeout or a 5xx is ambiguous, so those stay burned and
+the human approves again. For the same reason, non-GET calls to Razorpay are no
+longer retried: we send no idempotency key, so repeating a write whose response
+was lost creates a second real, payable link.
+
+### A captured payment is never un-captured
+
+`settleOrder` wrote the new status unconditionally. Razorpay emits
+`payment.failed` for every abandoned attempt and delivery is concurrent, not
+ordered, so a customer who fails 3-D Secure once and then succeeds could have
+the failure land second — and nothing recovers it, because the reconciler only
+sweeps `awaiting_payment`, which makes `failed` terminal. Money captured, ledger
+saying unpaid. A replayed failure body did it on demand.
+
+A `paid` order now ignores a later failure. A short payment moves to a terminal
+`mismatch` state instead of sitting in `awaiting_payment` forever, re-polling
+the gateway and writing an identical audit row every twenty seconds.
+
+### One visitor cannot delete another visitor's data
+
+The sandbox merchant cap ran `ORDER BY ingested_at DESC LIMIT -1 OFFSET keep`
+across the whole table after every ingestion, so a visitor who ingested twelve
+shops deleted everyone else's — and `ON DELETE CASCADE` took their products,
+quotes, approvals and orders too. Twelve requests, about two minutes under the
+rate limit. The seeded shop is the oldest row, so it died first.
+
+The cap is now per workspace, the instance's own seeded shops are never a
+visitor's to evict, and a separate global ceiling protects storage without
+reaching across tenants.
+
+### Ingestion is bounded in bytes and in time
+
+The request timeout was cleared as soon as the response headers arrived, so
+neither the deadline nor any size limit covered the body — and `res.json()` was
+then called on it uncapped. A gzip bomb of 550 KB on the wire decompressed to
+92 MB and took the process past its memory budget; a storefront that sent
+headers and then dribbled bytes pinned a worker indefinitely. `content-length`
+warned of neither.
+
+Bodies are now read under both the deadline and an 8 MB decoded cap. Verified
+against both attacks.
+
 ## Known gaps
 
 Stated plainly, because a security document that claims completeness is not
@@ -187,7 +280,11 @@ credible.
 
 - **No TLS of its own.** It expects to sit behind a tunnel or reverse proxy.
 - **Rate limits are per-process and in memory.** They do not survive a restart
-  and would not hold across multiple instances.
+  and would not hold across multiple instances. They are also only as good as
+  `request.ip`: behind Render's edge every request arrives from the same socket
+  peer, so the server now trusts exactly one proxy hop. Trusting the whole
+  `X-Forwarded-For` chain would let any caller mint a fresh address per request
+  and make every limit decorative.
 - **The console token is a single shared secret.** No users, roles, rotation or
   expiry.
 - **No CSRF tokens.** Cookies now exist, so this claim had to be rewritten:
@@ -197,11 +294,23 @@ credible.
   deployment should add a double-submit token rather than rely on one browser
   behaviour.
 - **Ingestion trusts merchant content.** Product text from a shop is stored and
-  shown to buyer agents; it is stripped of markup, but a hostile merchant could
-  still attempt prompt injection against a buyer agent through a product
-  description. Mitigating that properly is unsolved industry-wide.
+  shown to buyer agents. Anyone may ingest any storefront, so the shop *name* —
+  taken from the target site's own `<title>` — was attacker-controlled text
+  interpolated straight into the MCP `instructions` block, which is the
+  highest-trust text an MCP client receives. It could not raise the attacker's
+  own caps; it could talk somebody else's agent into asking its human for a
+  larger one. Merchant-supplied labels are now whitespace-collapsed and length-
+  bounded, and the instructions tell the agent explicitly that everything the
+  tools return is text the shop wrote about itself. That is mitigation, not a
+  fix: prompt injection through merchant content is unsolved industry-wide.
 - **Test mode only.** The server refuses live keys, so no defence here has been
   exercised against real money.
+- **Catalog prices are trusted for shape, not for honesty.** Negative and
+  zero prices are now rejected at ingest — a negative line item made every cap
+  a statement about a signed sum — but a merchant can still publish whatever
+  positive price it likes.
+- **No idempotency key is sent to Razorpay.** Writes are therefore not retried
+  at all, which trades a transient failure for an honest refusal.
 - **DNS rebinding is not mitigated.** The SSRF guard resolves a hostname and
   then `fetch` resolves it again independently, so a zero-TTL zone answering
   public-then-private walks through. Fixing it properly means pinning the

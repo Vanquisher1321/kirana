@@ -193,6 +193,26 @@ export function markQuote(quoteId: string, status: Quote['status']): void {
   db.prepare('UPDATE quotes SET status = ? WHERE id = ?').run(status, quoteId);
 }
 
+/**
+ * Burn the quote ATOMICALLY, and report whether this caller is the one who did.
+ *
+ * "Single-use" used to be enforced by reading the status in the guard and
+ * writing it after the gateway call -- with two awaited network round-trips in
+ * between. Node's loop happily interleaves N callers inside that window: every
+ * one of them read `open`, every one of them got an order, and one human
+ * approval funded N payment links. The check and the write have to be the same
+ * statement.
+ */
+export function claimQuote(quoteId: string): boolean {
+  const r = db.prepare("UPDATE quotes SET status = 'consumed' WHERE id = ? AND status = 'open'").run(quoteId);
+  return Number(r.changes) === 1;
+}
+
+/** Hand it back, for a failure we know never reached the gateway. */
+export function releaseQuote(quoteId: string): void {
+  db.prepare("UPDATE quotes SET status = 'open' WHERE id = ? AND status = 'consumed'").run(quoteId);
+}
+
 export interface QuoteValidation {
   ok: boolean;
   code?: 'not_found' | 'bad_signature' | 'expired' | 'already_used' | 'price_drift' | 'stock_drift';

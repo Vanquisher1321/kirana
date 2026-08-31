@@ -171,3 +171,55 @@ test('the platform persona is the one view that legitimately reads across', asyn
   assert.ok(list.some((c) => c.id === aliceConsentId), 'a platform console that cannot see the platform is useless');
   assert.ok(aliceOrderMerchant.length > 0);
 });
+
+test('ESCALATION: choosing the Razorpay persona does not grant the right to approve', async () => {
+  // The sandbox lets any visitor hand themselves the platform role or reviewer
+  // mode -- one unauthenticated POST each, deliberately, because judges need to
+  // see all three consoles. The bug was that the SAME predicate then guarded
+  // acting: `owns()` returned true for anyone with `role=platform` or
+  // `fullAccess`, so two requests turned a stranger into someone who could
+  // approve, reject or revoke another visitor's spending. Reading widely and
+  // acting widely are different powers.
+  const mallory2 = new Visitor();
+  await mallory2.role('platform');
+
+  // The read view really does widen -- that part is intended.
+  const seen = await (await mallory2.fetch('/api/approvals?scope=platform')).json() as Array<{ id: string }>;
+  assert.ok(seen.some((c) => c.id === aliceConsentId), 'the platform console can see the queue');
+
+  // Acting on it does not.
+  for (const verb of ['approve', 'reject', 'revoke']) {
+    const res = await mallory2.fetch(`/api/approvals/${aliceConsentId}/${verb}`, {
+      method: 'POST', body: JSON.stringify({ by: 'mallory' }),
+    });
+    assert.equal(res.status, 404, `${verb} must stay out of reach of a self-selected role`);
+  }
+
+  // Reviewer mode is the same story from the other direction.
+  const judge = new Visitor();
+  await judge.role('merchant');
+  await judge.fetch('/api/session/full-access', { method: 'POST', body: JSON.stringify({ enabled: true }) });
+  const res = await judge.fetch(`/api/approvals/${aliceConsentId}/approve`, {
+    method: 'POST', body: JSON.stringify({ by: 'judge' }),
+  });
+  assert.equal(res.status, 404, 'reviewer mode is a wider view, not a wider hand');
+
+  const still = await (await alice.fetch(`/api/approvals/${aliceConsentId}`)).json() as { status: string };
+  assert.equal(still.status, 'pending', 'and the approval is still the owner’s to make');
+});
+
+test('SECURITY: the audit feed never hands one visitor another visitor’s session', async () => {
+  // A workspace id IS the cookie. It used to appear in `actor` on every
+  // kill-switch press and in `detail` on every ingest, and unowned rows were
+  // shown to everyone -- so GET /api/audit was a list of other people's
+  // sessions, and this works with no token in locked mode too.
+  await alice.fetch('/api/system/kill-switch', { method: 'POST', body: JSON.stringify({ engage: true, reason: 'test' }) });
+  await alice.fetch('/api/system/kill-switch', { method: 'POST', body: JSON.stringify({ engage: false }) });
+
+  const aliceWs = ((await (await alice.fetch('/api/session')).json()) as { workspaceId: string }).workspaceId;
+  const snooper = new Visitor();
+  await snooper.role('platform');   // the widest view any visitor can obtain
+  const feed = await (await snooper.fetch('/api/audit?limit=500&scope=platform')).text();
+  assert.equal(feed.includes(aliceWs), false, 'no scope may reveal a session id');
+  assert.match(feed, /ws:[0-9a-f]{8}/, 'rows stay attributable by a one-way reference');
+});

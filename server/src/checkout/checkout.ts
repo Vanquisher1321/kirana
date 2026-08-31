@@ -4,8 +4,8 @@ import { config } from '../lib/config.ts';
 import { formatInr } from '../lib/money.ts';
 import { record } from '../audit/ledger.ts';
 import { authorise, type GuardCheck } from './guard.ts';
-import { markQuote } from './quote.ts';
-import { markConsent } from './consent.ts';
+import { markQuote, claimQuote, releaseQuote } from './quote.ts';
+import { markConsent, claimConsent, releaseConsent } from './consent.ts';
 import { ensureAgent } from './agents.ts';
 import { getMerchant } from '../catalog/store.ts';
 import { createOrder, createPaymentLink, RazorpayError, CircuitOpenError, type CallOptions } from '../razorpay/client.ts';
@@ -117,6 +117,42 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutOutcome> {
     };
   }
 
+  // ---------------------------------------------------------------------
+  // Burn the quote and the consent BEFORE touching the gateway.
+  //
+  // The guard read them a few lines ago and they were fine. That read is not a
+  // reservation: the two awaits below hand the event loop to every other
+  // in-flight checkout, all of which read the same `open` quote and the same
+  // `granted` consent and all of which get their own order. One approval, N
+  // payment links, every cap satisfied individually and none of them in
+  // aggregate. The claim has to be the same statement as the check.
+  // ---------------------------------------------------------------------
+  if (!claimQuote(quote.id)) {
+    db.prepare("UPDATE orders SET status = 'failed', failure_reason = ?, updated_at = ? WHERE id = ?")
+      .run('quote already used by another request', nowIso(), orderId);
+    record({
+      actor, action: 'checkout.blocked', subjectId: orderId, outcome: 'blocked',
+      detail: { blockedBy: 'quote_race', quoteId: quote.id },
+    });
+    return {
+      ok: false, checks: decision.checks, blockedBy: 'quote_single_use',
+      reason: 'That quote was already used by another request. Nothing was charged.',
+    };
+  }
+  if (!claimConsent(input.consentId)) {
+    releaseQuote(quote.id);
+    db.prepare("UPDATE orders SET status = 'failed', failure_reason = ?, updated_at = ? WHERE id = ?")
+      .run('approval already used by another request', nowIso(), orderId);
+    record({
+      actor, action: 'checkout.blocked', subjectId: orderId, outcome: 'blocked',
+      detail: { blockedBy: 'consent_race', consentId: input.consentId },
+    });
+    return {
+      ok: false, checks: decision.checks, blockedBy: 'consent_single_use',
+      reason: 'That approval was already used by another request. Nothing was charged.',
+    };
+  }
+
   const receipt = orderId.replace('ord_', 'kir');
   const notes = {
     kirana_order: orderId,
@@ -154,10 +190,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutOutcome> {
               status = 'awaiting_payment', updated_at = ?, failure_reason = NULL WHERE id = ?`,
     ).run(rzpOrder.id, link.id, nowIso(), orderId);
 
-    // The quote and the consent are both single-use. Burning them here means a
-    // replay cannot ride the same approval into a second order.
-    markQuote(quote.id, 'consumed');
-    markConsent(input.consentId, 'consumed');
+    // Both were already burned above, atomically, before the gateway call.
 
     record({
       actor,
@@ -198,9 +231,25 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutOutcome> {
     db.prepare("UPDATE orders SET status = 'failed', failure_reason = ?, updated_at = ? WHERE id = ?")
       .run(reason, nowIso(), orderId);
 
+    // Hand the quote and approval back ONLY when we know nothing was created:
+    // the breaker refused to send, or Razorpay answered with a definite,
+    // non-retryable error. A timeout or a 5xx is ambiguous -- the charge may
+    // exist -- and there we keep them burned and make the human approve again.
+    // Releasing on an ambiguous failure is how one approval becomes two links.
+    const certainlyNotSent = err instanceof CircuitOpenError
+      || (err instanceof RazorpayError && err.retryable === false);
+    if (certainlyNotSent) {
+      releaseConsent(input.consentId);
+      releaseQuote(quote.id);
+    }
+
     record({
       actor, action: 'checkout.failed', subjectId: orderId, outcome: 'failed',
-      detail: { reason, quoteId: quote.id, amountMinor: quote.totalMinor, retryable: err instanceof RazorpayError ? err.retryable : false },
+      detail: {
+        reason, quoteId: quote.id, amountMinor: quote.totalMinor,
+        retryable: err instanceof RazorpayError ? err.retryable : false,
+        approvalReusable: certainlyNotSent,
+      },
     });
 
     return {
@@ -261,6 +310,27 @@ export function settleOrder(input: {
 
   const orderId = String(row.id);
 
+  // A captured payment is never un-captured by a later event.
+  //
+  // Razorpay emits payment.failed for every abandoned attempt, and delivery is
+  // concurrent, not ordered -- so a customer who fails 3-D Secure once and then
+  // succeeds can have the failure land second. The UPDATE below is
+  // unconditional on the current status, so that ordering flipped a paid order
+  // to failed, and nothing recovers it: the reconciler only sweeps
+  // `awaiting_payment`, which makes `failed` terminal. Money captured, ledger
+  // says the customer did not pay. A replayed failure body does the same on
+  // demand.
+  if (String(row.status) === 'paid' && input.status === 'failed') {
+    record({
+      actor: 'razorpay:webhook', action: 'settlement.late_failure_ignored', subjectId: orderId, outcome: 'ok',
+      detail: {
+        paymentId: input.paymentId,
+        note: 'A failed attempt arrived for an order that is already paid. Ignored; the capture stands.',
+      },
+    });
+    return orderId;
+  }
+
   // An order is only "paid" when the amount actually captured matches what we
   // charged. Without this, a webhook (or a link whose amount was edited) can
   // settle a large order with a small payment -- the ledger would say paid and
@@ -270,12 +340,22 @@ export function settleOrder(input: {
     const expectedCurrency = String((db.prepare('SELECT currency FROM orders WHERE id = ?').get(orderId) as { currency: string }).currency);
     const currencyOk = !input.currency || input.currency === expectedCurrency;
     if (input.amountMinor !== expected || !currencyOk) {
-      db.prepare("UPDATE orders SET failure_reason = ?, updated_at = ? WHERE id = ?")
-        .run(`amount mismatch: captured ${input.amountMinor} ${input.currency ?? ''} against ${expected} ${expectedCurrency}`, nowIso(), orderId);
-      record({
-        actor: 'system', action: 'settlement.amount_mismatch', subjectId: orderId, outcome: 'blocked',
-        detail: { paymentId: input.paymentId, captured: input.amountMinor, expected, capturedCurrency: input.currency ?? null, expectedCurrency },
-      });
+      // Refusing to call a short payment "paid" is right. Leaving the row in
+      // awaiting_payment was not: the reconciler re-selected it every 20s
+      // forever, re-polling the gateway and writing an identical mismatch row
+      // each time, while the webhook returned 200 so Razorpay stopped
+      // retrying. Money captured, nobody told, log growing without bound.
+      // `mismatch` is terminal and visible -- it needs a human, and now it can
+      // get one.
+      const already = String(row.status) === 'mismatch';
+      db.prepare("UPDATE orders SET status = 'mismatch', razorpay_payment_id = ?, failure_reason = ?, updated_at = ? WHERE id = ?")
+        .run(input.paymentId, `amount mismatch: captured ${input.amountMinor} ${input.currency ?? ''} against ${expected} ${expectedCurrency}`, nowIso(), orderId);
+      if (!already) {
+        record({
+          actor: 'system', action: 'settlement.amount_mismatch', subjectId: orderId, outcome: 'blocked',
+          detail: { paymentId: input.paymentId, captured: input.amountMinor, expected, capturedCurrency: input.currency ?? null, expectedCurrency },
+        });
+      }
       return orderId;
     }
   }

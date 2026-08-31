@@ -132,6 +132,16 @@ export const shopifyAdapter: StorefrontAdapter = {
           warnings.push(`Skipped variant ${v.id} of "${p.title}": unparseable price ${JSON.stringify(v.price)}.`);
           continue;
         }
+        // toMinor accepts a leading minus, deliberately, because it is also
+        // used for refunds. A CATALOG price is different: a storefront we do
+        // not control can publish a negative one, and since every cap is a
+        // statement about the signed sum, a -₹499,000 line makes a ₹500,000
+        // basket total ₹1,000 and pass every gate. A price is a positive
+        // number of paise or it is not a price.
+        if (!Number.isSafeInteger(priceMinor) || priceMinor < 1) {
+          warnings.push(`Skipped variant ${v.id} of "${p.title}": price is not a positive amount.`);
+          continue;
+        }
         let compareAtMinor: number | undefined;
         if (v.compare_at_price) {
           try { compareAtMinor = toMinor(v.compare_at_price); } catch { /* optional */ }

@@ -39,10 +39,37 @@ export interface ReconcileReport {
 /** Orders left in limbo long enough that a webhook probably is not coming. */
 const MIN_AGE_MS = 5_000;
 
+/**
+ * After this long, an unpaid order is abandoned, not pending.
+ *
+ * Nothing used to leave `awaiting_payment`, ever. The sweep takes the 25 oldest
+ * such rows and does not touch `updated_at` on the ones it leaves pending, so
+ * those same 25 abandoned baskets were re-selected every 20 seconds forever --
+ * about 4,500 gateway calls an hour spent re-polling links nobody will pay,
+ * while the customer who DID pay sat at position 26 and was never looked at.
+ * A queue that never drains is not a queue.
+ *
+ * The payment link itself expires 30 minutes after the quote, so an order this
+ * old cannot still be paid.
+ */
+const ABANDON_AFTER_MS = 6 * 60 * 60 * 1000;
+
 export async function reconcile(opts: { limit?: number; rzpOptions?: CallOptions; minAgeMs?: number } = {}): Promise<ReconcileReport> {
   const report: ReconcileReport = {
     checked: 0, settled: 0, stillPending: 0, failed: 0, skipped: 0, errors: [], ranAt: nowIso(),
   };
+
+  // Retire what can no longer be paid, so the window moves.
+  const abandonBefore = new Date(Date.now() - ABANDON_AFTER_MS).toISOString();
+  const abandoned = db.prepare(
+    "UPDATE orders SET status = 'expired', failure_reason = 'not paid before the payment link expired', updated_at = ? WHERE status = 'awaiting_payment' AND created_at <= ?",
+  ).run(nowIso(), abandonBefore);
+  if (Number(abandoned.changes) > 0) {
+    record({
+      actor: 'system:reconciler', action: 'orders.expired', subjectId: null, outcome: 'ok',
+      detail: { count: Number(abandoned.changes), olderThanHours: ABANDON_AFTER_MS / 3600_000 },
+    });
+  }
 
   const cutoff = new Date(Date.now() - (opts.minAgeMs ?? MIN_AGE_MS)).toISOString();
   const rows = db.prepare(
@@ -67,9 +94,18 @@ export async function reconcile(opts: { limit?: number; rzpOptions?: CallOptions
         if (good) {
           captured = { id: good.payment_id, amountMinor: good.amount };
         } else if (link.status === 'paid') {
-          // Paid but the payment array is not populated yet: trust the status
-          // and record the link id so the entry is still traceable.
-          captured = { id: attempts[0]?.payment_id ?? link.id };
+          // Paid but the payment array is not populated yet. This branch used
+          // to pass no amount at all, which skipped settleOrder's amount check
+          // entirely -- the one path where the ledger asserted "money
+          // received" without checking how much -- and stored a plink_ id in
+          // the payment-id column, where every refund or support lookup would
+          // later fail. The link object reports amount_paid; use it, and keep
+          // the payment id null rather than lying about which id it is.
+          captured = {
+            id: attempts[0]?.payment_id ?? link.id,
+            amountMinor: typeof link.amount_paid === 'number' ? link.amount_paid : undefined,
+            currency: link.currency,
+          };
         } else {
           const bad = attempts.find((p) => p.status === 'failed');
           if (bad) failed = { id: bad.payment_id, code: 'payment_failed', description: 'The payment attempt did not complete.' };
@@ -115,6 +151,13 @@ export async function reconcile(opts: { limit?: number; rzpOptions?: CallOptions
       } else {
         report.stillPending++;
       }
+
+      // Touch every row we looked at, settled or not. `ORDER BY updated_at ASC`
+      // is only fair if looking at a row moves it to the back of the queue;
+      // without this the same 25 rows are swept for ever and row 26 is never
+      // reached.
+      db.prepare("UPDATE orders SET updated_at = ? WHERE id = ? AND status = 'awaiting_payment'")
+        .run(nowIso(), row.id);
     } catch (err) {
       if (err instanceof CircuitOpenError) {
         report.skipped = rows.length - report.checked + 1;

@@ -202,6 +202,16 @@ export function markConsent(consentId: string, status: Consent['status']): void 
   db.prepare('UPDATE consents SET status = ? WHERE id = ?').run(status, consentId);
 }
 
+/** Atomic counterpart to claimQuote. One approval, one checkout, no race. */
+export function claimConsent(consentId: string): boolean {
+  const r = db.prepare("UPDATE consents SET status = 'consumed' WHERE id = ? AND status = 'granted'").run(consentId);
+  return Number(r.changes) === 1;
+}
+
+export function releaseConsent(consentId: string): void {
+  db.prepare("UPDATE consents SET status = 'granted' WHERE id = ? AND status = 'consumed'").run(consentId);
+}
+
 /** The revoke button. Instant, unilateral, and logged. */
 export function revokeConsent(consentId: string, by = 'human'): Consent {
   const c = getConsent(consentId);

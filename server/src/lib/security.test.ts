@@ -93,22 +93,35 @@ test('rate limiter allows a burst then refuses with a retry hint', () => {
   assert.equal(rateLimit('agent:y', 5, 60_000).ok, true);
 });
 
-test('SANDBOX: the merchant cap keeps the newest shops and evicts the rest', async () => {
+test('SANDBOX: the merchant cap is per visitor and never reaches another tenant', async () => {
   process.env.KIRANA_ACCESS = 'demo';
   const { evictOldestMerchants } = await import('./selfheal.ts');
   const { db } = await import('./db.ts');
 
   db.exec("DELETE FROM merchants;");
-  const ins = db.prepare("INSERT INTO merchants (id, slug, name, origin_url, platform, currency, policies, ingested_at) VALUES (?,?,?,?,'shopify','INR','{}',?)");
+  const ins = db.prepare(
+    "INSERT INTO merchants (id, slug, name, origin_url, platform, currency, policies, ingested_at, workspace_id) VALUES (?,?,?,?,'shopify','INR','{}',?,?)",
+  );
+  // The greedy visitor.
   for (let i = 0; i < 6; i++) {
-    ins.run(`m${i}`, `shop-${i}`, `Shop ${i}`, `https://s${i}.test`, new Date(2026, 0, i + 1).toISOString());
+    ins.run(`m${i}`, `shop-${i}`, `Shop ${i}`, `https://s${i}.test`, new Date(2026, 0, i + 1).toISOString(), 'ws_greedy');
   }
+  // A bystander, and the instance's own seeded shop (workspace_id NULL).
+  ins.run('mV', 'victim-shop', 'Victim Shop', 'https://v.test', new Date(2026, 0, 1).toISOString(), 'ws_victim');
+  ins.run('mS', 'seeded-shop', 'Seeded Shop', 'https://s.test', new Date(2025, 0, 1).toISOString(), null);
 
-  const evicted = evictOldestMerchants(3);
-  assert.equal(evicted, 3, 'three oldest shops removed');
+  const evicted = evictOldestMerchants(3, 'ws_greedy');
+  assert.equal(evicted, 3, 'three of the greedy visitor’s oldest shops removed');
 
-  const left = (db.prepare('SELECT slug FROM merchants ORDER BY ingested_at DESC').all() as Array<{ slug: string }>).map((r) => r.slug);
-  assert.deepEqual(left, ['shop-5', 'shop-4', 'shop-3'], 'the newest survive — a visitor cannot bury the demo shop');
+  const mine = (db.prepare("SELECT slug FROM merchants WHERE workspace_id = 'ws_greedy' ORDER BY ingested_at DESC").all() as Array<{ slug: string }>).map((r) => r.slug);
+  assert.deepEqual(mine, ['shop-5', 'shop-4', 'shop-3'], 'their newest survive');
+
+  // The whole point of the fix: nobody else was touched.
+  const others = (db.prepare('SELECT slug FROM merchants WHERE workspace_id IS NOT ? ORDER BY slug').all('ws_greedy') as Array<{ slug: string }>).map((r) => r.slug);
+  assert.deepEqual(others, ['seeded-shop', 'victim-shop'], 'a bystander and the seeded shop both survive');
+
+  // And the seeded shop is not evictable by a cap at all.
+  assert.equal(evictOldestMerchants(0, null), 0, 'the instance’s own shops are never a visitor’s to evict');
   db.exec("DELETE FROM merchants;");
 });
 
@@ -155,7 +168,7 @@ test('TENANCY: two workspaces cannot see each other’s shops, orders or record'
   assert.equal(getMerchantForMcp('sharedshop-example'), null, 'an ambiguous slug must not pick a tenant at random');
 });
 
-test('TENANCY: the audit trail a tenant reads is its own, plus system events', async () => {
+test('TENANCY: a tenant reads its own audit trail and nothing else', async () => {
   const { createWorkspace } = await import('./workspace.ts');
   const { record, list } = await import('../audit/ledger.ts');
 
@@ -169,7 +182,32 @@ test('TENANCY: the audit trail a tenant reads is its own, plus system events', a
   const aliceSees = list(50, alice.id).map((r) => r.subjectId);
   assert.ok(aliceSees.includes('a1'), 'own entries');
   assert.ok(!aliceSees.includes('b1'), 'never another tenant’s entries');
-  assert.ok(list(50, alice.id).some((r) => r.action === 'sandbox.reset'), 'system events are shared');
+
+  // This assertion used to be the opposite: unowned rows were shown to every
+  // tenant so that "system events are shared". Most rows were unowned, because
+  // attribution was optional and thirty call sites omitted it -- so the shared
+  // feed carried other people's quotes, orders and approvals, and (see the next
+  // test) their session cookies. Unowned rows belong to the platform view.
+  assert.ok(!list(50, alice.id).some((r) => r.action === 'sandbox.reset'), 'system events are not a tenant’s to read');
+  assert.ok(list(50, undefined).some((r) => r.action === 'sandbox.reset'), 'the platform view still sees them');
+});
+
+test('SECURITY: a workspace id is never readable out of the audit trail', async () => {
+  const { createWorkspace } = await import('./workspace.ts');
+  const { record, list } = await import('../audit/ledger.ts');
+
+  const victim = createWorkspace('Victim');
+  const snooper = createWorkspace('Snooper');
+
+  // The two shapes that leaked it: the id inside `actor`, and inside `detail`.
+  // A workspace id IS the session cookie, so publishing one is publishing the
+  // account. Attribution is what a row needs; the raw id is never content.
+  record({ actor: `human:console:${victim.id}`, action: 'kill_switch.engaged', subjectId: null, outcome: 'ok' });
+  record({ actor: 'console', action: 'ingest.completed', subjectId: 'mch_x', outcome: 'ok', detail: { workspaceId: victim.id } });
+
+  const everything = JSON.stringify([...list(200, snooper.id), ...list(200, undefined)]);
+  assert.ok(!everything.includes(victim.id), 'no reader of any scope can recover a session id');
+  assert.ok(everything.includes('ws:'), 'a short one-way reference is kept, so rows stay attributable');
 });
 
 test('ROLES: a workspace only ever gets its own dashboard', async () => {

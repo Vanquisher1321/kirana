@@ -1,10 +1,10 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { config } from './lib/config.ts';
 import { ingestStorefront, IngestError } from './catalog/ingest.ts';
 import { getMerchant, getMerchantForMcp, listMerchants, latestRun, searchCatalog } from './catalog/store.ts';
 import { buildMcpServer } from './mcp/server.ts';
-import { list as auditList, verify as auditVerify, forSubject, record } from './audit/ledger.ts';
+import { list as auditList, verify as auditVerify, forSubject, record, workspaceRef } from './audit/ledger.ts';
 import { formatInr } from './lib/money.ts';
 import { listPendingConsents, approveConsent, rejectConsent, revokeConsent, getConsent, consentWorkspace, ConsentError } from './checkout/consent.ts';
 import { getQuote } from './checkout/quote.ts';
@@ -21,13 +21,28 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadBundle, lookup } from './lib/staticfiles.ts';
 
-export function buildApp() {
-    const app = Fastify({
+export function buildApp(): FastifyInstance {
+  // Trust EXACTLY the immediate peer (hop 0) -- the proxy we are actually
+  // behind -- and nothing further up. `trustProxy: true` would trust the whole
+  // X-Forwarded-For chain, which the client writes, so any caller could hand
+  // itself a fresh IP per request and every per-IP rate limit would be
+  // decorative. With no proxy in front (a local run) request.ip is already the
+  // real peer, so nothing is trusted at all.
+  const trustedProxyHops = config.publicOrigin ? (_address: string, hop: number) => hop === 0 : false;
+    const serverOptions: FastifyServerOptions = {
       logger: process.env.KIRANA_QUIET
         ? false
         : { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss', ignore: 'pid,hostname,reqId,responseTime' } } },
       bodyLimit: 2 * 1024 * 1024,
-    });
+      // Behind Render's edge every request arrives from the same socket peer,
+      // so `request.ip` was identical for every visitor and each per-IP rate
+      // limit became one instance-wide bucket: one script looping /api/ingest
+      // 429s everybody. Trust exactly ONE hop -- the proxy we are actually
+      // behind -- never the whole X-Forwarded-For chain, which the client
+      // controls.
+      trustProxy: trustedProxyHops,
+    };
+    const app = Fastify(serverOptions);
 
   // Razorpay signs the EXACT bytes it sends. Verifying against a re-serialised
   // body (JSON.stringify(request.body)) compares our formatting to their
@@ -113,8 +128,16 @@ export function buildApp() {
 
       // Locked: reading stays open so the console is legible, but every
       // endpoint that spends, approves, ingests, pauses or issues a key is a
-      // POST -- so the verb is the whole distinction.
+      // POST -- so the verb is very nearly the whole distinction.
       if (request.method === 'GET') return;
+
+      // The exception: /api/session/* only ever writes to the caller's OWN
+      // workspace -- which dashboard they get, and reviewer mode, which is
+      // demo-only and refused in its own handler. Requiring the operator token
+      // here meant a first-time visitor to a locked deployment got 401 from
+      // the onboarding screen and could never choose a role at all: the
+      // console was unusable by exactly the people it is for.
+      if (route.startsWith('/api/session')) return;
 
       // A failed console auth is both rate-limited and recorded. Without this
       // a credential-stuffing run against the approve endpoint is unlimited and
@@ -140,7 +163,14 @@ export function buildApp() {
 
     if (route.startsWith('/mcp/')) {
       const key = String(request.headers['x-kirana-agent-key'] ?? '');
-      const label = String(request.headers['x-kirana-agent'] ?? '');
+      // A self-asserted name becomes a primary key in `agents` and the actor
+      // string on audit rows the merchant reads, so it cannot be arbitrary
+      // header bytes: unbounded and unvalidated, it is both unbounded row
+      // growth and attacker-chosen text written into somebody else's console.
+      // Anything that is not a plausible agent name is simply ignored, which
+      // leaves the caller anonymous rather than failing their request.
+      const rawLabel = String(request.headers['x-kirana-agent'] ?? '').trim();
+      const label = /^[a-zA-Z0-9][a-zA-Z0-9 ._-]{0,47}$/.test(rawLabel) ? rawLabel : '';
       const identity = key ? (agentForKey(key)?.id ?? null) : null;
       if (key && !identity) {
         return reply.code(401).send({
@@ -193,7 +223,8 @@ export function buildApp() {
     if (request.operator) return undefined;
     const wantsAll = (request.query as { scope?: string } | undefined)?.scope === 'platform';
     // Asking is not enough — the workspace must BE the platform, or have
-    // deliberately turned on reviewer mode.
+    // deliberately turned on reviewer mode. Note this is READ reach only;
+    // acting on another tenant's records needs the operator token (see owns).
     const mayReadAll = request.workspaceRole === 'platform' || request.fullAccess === true;
     return wantsAll && mayReadAll ? undefined : ws(request);
   };
@@ -217,17 +248,31 @@ export function buildApp() {
    * reviewer mode, matching `scopeFor`. Everyone else gets a 404 rather than a
    * 403, so the endpoint does not confirm that the ID exists.
    */
-  const mayCross = (request: { workspaceRole?: Role | null; fullAccess?: boolean }) =>
-    request.workspaceRole === 'platform' || request.fullAccess === true;
+  /**
+   * READING across tenants and ACTING across tenants are different powers.
+   *
+   * On the sandbox a visitor may hand themselves the platform role or reviewer
+   * mode -- both are one unauthenticated POST, deliberately, because judges
+   * need to see all three consoles. That is fine for a read view of a test-mode
+   * instance. It is NOT a licence to approve, reject or revoke somebody else's
+   * spending, which is exactly what happens if the same predicate guards both:
+   * one POST to /api/session/role and the entire human-in-the-loop guarantee
+   * belongs to whoever asked for it last.
+   *
+   * So only the operator token -- the deploy secret, which no visitor has --
+   * may act across tenants. Everyone else acts on their own workspace and reads
+   * as widely as their persona allows.
+   */
+  const mayActCrossTenant = (request: { operator?: boolean }) => request.operator === true;
 
   const owns = (
-    request: { workspaceId?: string; workspaceRole?: Role | null; fullAccess?: boolean },
+    request: { workspaceId?: string; operator?: boolean },
     ownerWorkspace: string | null,
   ): boolean => {
     // NOT relaxed in demo mode. The open sandbox is exactly where strangers
     // share one instance, so it is exactly where one visitor approving
     // another's spending would matter most.
-    if (mayCross(request)) return true;
+    if (mayActCrossTenant(request)) return true;
     return ownerWorkspace !== null && ownerWorkspace === ws(request);
   };
 
@@ -267,8 +312,8 @@ export function buildApp() {
     const enabled = (request.body as { enabled?: boolean } | undefined)?.enabled !== false;
     const updated = setFullAccess(r.workspaceId, enabled);
     record({
-      actor: `workspace:${r.workspaceId}`, action: enabled ? 'session.reviewer_mode_on' : 'session.reviewer_mode_off',
-      subjectId: r.workspaceId, outcome: 'ok', detail: {}, workspaceId: r.workspaceId,
+      actor: workspaceRef(r.workspaceId), action: enabled ? 'session.reviewer_mode_on' : 'session.reviewer_mode_off',
+      subjectId: null, outcome: 'ok', detail: {}, workspaceId: r.workspaceId,
     });
     return updated;
   });
@@ -287,13 +332,28 @@ export function buildApp() {
     }
     const updated = setWorkspaceRole(r.workspaceId, wanted as Role);
     record({
-      actor: `workspace:${r.workspaceId}`,
+      actor: workspaceRef(r.workspaceId),
       action: r.workspaceRole ? 'session.role_switched' : 'session.role_chosen',
-      subjectId: r.workspaceId, outcome: 'ok',
+      subjectId: null, outcome: 'ok',
       detail: { from: r.workspaceRole, to: wanted, demo: config.isDemo },
       workspaceId: r.workspaceId,
     });
     return updated;
+  });
+
+  /**
+   * Fastify's default handler returns the thrown error's message and code, so
+   * an unhandled fault answers with engine internals. Every deliberate refusal
+   * in this app is an explicit reply; anything that reaches here is a bug, and
+   * a bug tells the operator's log, not the caller.
+   */
+  app.setErrorHandler((err: unknown, request, reply) => {
+    const status = (err as { statusCode?: number }).statusCode ?? 500;
+    // A 4xx from the framework is about the caller's own request (a malformed
+    // body, an unsupported content type) and telling them is the point.
+    if (status < 500) return reply.code(status).send({ error: 'bad_request', message: (err as Error).message });
+    request.log.error(err);
+    return reply.code(500).send({ error: 'internal_error', message: 'Something went wrong. Nothing was charged.' });
   });
 
   app.get('/health', async () => ({ ok: true, service: 'kirana', razorpay: config.razorpay.configured }));
@@ -321,7 +381,10 @@ export function buildApp() {
         usedLlm: run ? Number(run.used_llm) === 1 : false,
         warnings: run ? (JSON.parse(String(run.warnings)) as string[]) : [],
         durationMs: run ? Number(run.duration_ms) : 0,
-        mcpUrl: `${config.publicOrigin || `http://localhost:${config.port}`}/mcp/${m.slug}`,
+        // public_id, not slug: the slug comes from the shop's hostname and is
+        // unique only within a workspace, so anyone re-ingesting the same shop
+        // made the published URL ambiguous and every agent using it got a 404.
+        mcpUrl: `${config.publicOrigin || `http://localhost:${config.port}`}/mcp/${m.publicId || m.slug}`,
       };
     }),
   );
@@ -336,7 +399,7 @@ export function buildApp() {
     }
     try {
       const report = await ingestStorefront(body.url, { workspaceId: ws(request as never) });
-      enforceMerchantCap();
+      enforceMerchantCap(ws(request as never));
       const merchant = getMerchant(report.merchantId)!;
       return {
         ...report,
@@ -345,8 +408,10 @@ export function buildApp() {
       };
     } catch (err) {
       if (err instanceof IngestError) return reply.code(422).send({ error: err.message, origin: err.origin });
+      // IngestError messages are written for humans and are safe to return.
+      // Anything else is an internal fault: log it, do not narrate it.
       request.log.error(err);
-      return reply.code(500).send({ error: (err as Error).message });
+      return reply.code(500).send({ error: 'ingest_failed', message: 'The shop could not be read. Nothing was saved.' });
     }
   });
 
@@ -362,10 +427,15 @@ export function buildApp() {
   });
 
   app.get('/api/audit', async (request) => {
-    const { subject, limit } = request.query as { subject?: string; limit?: string };
+    const { subject, limit: rawLimit } = request.query as { subject?: string; limit?: string };
+    // `?limit=abc` used to reach SQLite and come back as
+    // {"code":"ERR_SQLITE_ERROR","message":"datatype mismatch"} -- engine
+    // detail, from a 500, on an unauthenticated route.
+    const parsed = Number(rawLimit);
+    const limit = Number.isSafeInteger(parsed) && parsed > 0 ? Math.min(parsed, 1000) : 200;
     return subject
       ? forSubject(subject, scopeFor(request as never))
-      : auditList(Number(limit ?? 200), scopeFor(request as never));
+      : auditList(limit, scopeFor(request as never));
   });
 
   app.get('/api/audit/verify', async () => auditVerify());
@@ -523,7 +593,7 @@ export function buildApp() {
     record({
       // Attributed to a workspace: on the open sandbox the stop button is
       // global, so the ledger must say WHICH visitor pressed it.
-      actor: `human:console:${ws(request as never) ?? 'anonymous'}`,
+      actor: `human:console:${(() => { const w = ws(request as never); return w ? workspaceRef(w) : 'anonymous'; })()}`,
       action: b.engage ? 'kill_switch.engaged' : 'kill_switch.released',
       subjectId: null, outcome: 'ok',
       detail: { reason: b.reason ?? null, autoReleasesAt: KILL_SWITCH.releasesAt || null },

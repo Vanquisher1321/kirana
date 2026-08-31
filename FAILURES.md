@@ -316,6 +316,79 @@ testing — `grep -c` on the route list, against the number of routes.
 
 ---
 
+## 11. The second review found more than the first, and the worst of it was ours
+
+After §10 we ran a second pass — two independent adversarial reviewers over
+distinct areas, plus live probing. It found more than the first pass did, and
+the three most serious findings were all introduced by fixes.
+
+**The audit trail was handing out session cookies.** A workspace id *is* the
+session: anyone who reads one becomes that visitor. Two audit call sites
+interpolated it into the row — one of them added by us an hour earlier, while
+fixing something else — and the feed showed unattributed rows to every tenant,
+which was most rows, because attribution was an optional parameter that thirty
+of thirty-five call sites omitted. So `GET /api/audit` returned a list of other
+people's sessions, no token needed, in locked mode too.
+
+The lesson is about the *shape* of the mistake, not the leak. Optional
+attribution on a security boundary is not a boundary. It is now derived from the
+row's subject, so no call site can forget it; unowned rows belong to the
+platform view; and every value written is scrubbed, so an id that slips through
+anyway becomes a one-way reference rather than a credential.
+
+**A self-selected role could approve a stranger's spending.** §10 added `owns()`
+so one tenant could not approve another's. It granted an exception to the
+platform role and to reviewer mode — which, on the sandbox, any visitor may
+hand themselves with one unauthenticated POST, deliberately, so judges can see
+all three consoles. Two requests and the human-in-the-loop guarantee belonged to
+whoever asked for it last. Reading across tenants and acting across tenants are
+different powers and needed different predicates; only the deploy secret acts.
+
+**Ten concurrent checkouts on one approval produced ten payable links.** Every
+single-use guarantee was enforced by reading a status in the guard and writing
+it *after* the gateway call, with two awaited round-trips in between. Node hands
+the event loop to every other in-flight request inside that window: all of them
+read `open`, all of them passed, all of them got an order. Each cap was
+satisfied individually and none in aggregate — and the MCP tool mints a fresh
+idempotency key whenever an agent omits one, so a merely *retrying* agent does
+this by accident.
+
+We measured it before fixing it: **ten calls, ten orders, ₹9,980 of live links
+against a ₹2,000 approval.** Then we made the check and the write the same
+statement, and measured again: one order, nine refusals. Then we put the fix
+back to broken and re-ran the new test, to be sure the test could actually see
+it. It could.
+
+Also found and fixed: a captured payment could be flipped to `failed` by a late
+or replayed `payment.failed` and never recovered; one visitor's twelve
+ingestions deleted every other visitor's shops through an unscoped eviction
+query; a 550 KB gzip bomb decompressed to 92 MB inside an ingest because the
+request deadline was cleared when the headers arrived and no size cap existed;
+the reconciler's 25-row window never drained, so a customer who paid sat behind
+25 abandoned baskets forever; writes to Razorpay were retried without an
+idempotency key; five IPv6 spellings of `169.254.169.254` were classified
+public; and — not a security bug but worse for the product — a first-time
+visitor to a *locked* deployment got 401 from the onboarding screen and could
+never choose a dashboard at all.
+
+**Three lessons, in order of how much they cost us.**
+
+1. **The tests encoded the vulnerable behaviour as a requirement.** One asserted
+   that "system events are shared" — the exact property that leaked the
+   sessions. Deleting an assertion to fix a bug should always be suspicious; it
+   was right here, and we had to say why in the test itself.
+2. **A mock that answers the same thing regardless of what it is asked models a
+   global variable, not a dependency.** We had already written that sentence in
+   §1 of this document, and the checkout mock still returned `order_TEST123` for
+   every order in the file — so a settlement test was matching a different
+   order than the one it had just created, and passing. Writing the lesson down
+   did not apply it.
+3. **A fix is a change, and changes get reviewed.** Every one of the three worst
+   findings arrived with a repair. Reviewing only the original code would have
+   missed all of them.
+
+---
+
 ## What we would tell someone starting this
 
 1. **Test the seam you do not control, against the real thing, early.** Our worst
@@ -328,6 +401,12 @@ testing — `grep -c` on the route list, against the number of routes.
 4. **Prefer deleting a dependency to patching it** when you barely needed it.
 5. **Look at the interface.** Half the defects in this document are invisible to
    a test suite and obvious in a screenshot.
-6. **Count, do not trust.** The most serious bug here was found by counting how
+6. **Count, do not trust.** One of the worst bugs here was found by counting how
    many routes applied a rule and comparing it to how many routes exist. A green
    suite tells you the cases you thought of still pass.
+7. **Break the fix to test the test.** After repairing the concurrency bug we
+   reverted the repair and re-ran the new test to watch it fail. A regression
+   test you have never seen fail is a hypothesis, not a test.
+8. **Review the repairs hardest.** Our three most serious findings were all
+   introduced by earlier fixes, in the same sitting, while making the system
+   safer.

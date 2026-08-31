@@ -116,11 +116,23 @@ export function classifyAddress(addr: string): string | null {
     if (allZero) return 'unspecified';
     if (b.slice(0, 15).every((x) => x === 0) && b[15] === 1) return 'loopback';
 
-    // IPv4-mapped (::ffff:0:0/96) and IPv4-compatible: judge the embedded IPv4,
-    // whichever spelling it arrived in.
+    // Every form that embeds an IPv4 address must be judged on that address.
+    // The comment here used to claim IPv4-compatible was handled; only the
+    // MAPPED prefix was actually tested, so `::a9fe:a9fe` -- 169.254.169.254,
+    // the cloud metadata service, in its IPv4-compatible spelling -- was
+    // classified public and allowed.
     const first10Zero = b.slice(0, 10).every((x) => x === 0);
+    // ::ffff:0:0/96 (IPv4-mapped)
     if (first10Zero && b[10] === 0xff && b[11] === 0xff) {
       return classifyAddress(`${b[12]}.${b[13]}.${b[14]}.${b[15]}`);
+    }
+    // ::/96 (IPv4-compatible, deprecated) and ::ffff:0:0:0/96 (SIIT).
+    if (first10Zero && b[10] === 0x00 && b[11] === 0x00) {
+      return classifyAddress(`${b[12]}.${b[13]}.${b[14]}.${b[15]}`) ?? 'IPv4-compatible address';
+    }
+    if (b.slice(0, 8).every((x) => x === 0) && b[8] === 0xff && b[9] === 0xff
+        && b[10] === 0x00 && b[11] === 0x00) {
+      return classifyAddress(`${b[12]}.${b[13]}.${b[14]}.${b[15]}`) ?? 'SIIT translation prefix';
     }
     // NAT64 well-known prefix 64:ff9b::/96 also embeds an IPv4 address.
     if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b
@@ -128,6 +140,10 @@ export function classifyAddress(addr: string): string | null {
       return classifyAddress(`${b[12]}.${b[13]}.${b[14]}.${b[15]}`) ?? 'NAT64 translation prefix';
     }
 
+    // 2002::/16 (6to4) carries the IPv4 address of the relay in bytes 2-5.
+    if (b[0] === 0x20 && b[1] === 0x02) {
+      return classifyAddress(`${b[2]}.${b[3]}.${b[4]}.${b[5]}`) ?? '6to4 tunnel prefix';
+    }
     if ((b[0]! & 0xfe) === 0xfc) return 'unique local';
     if (b[0] === 0xfe && (b[1]! & 0xc0) === 0x80) return 'link-local';
     if (b[0] === 0xff) return 'multicast';

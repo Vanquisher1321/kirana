@@ -247,10 +247,17 @@ web/src/
 Nine tables. The ones that carry the argument:
 
 - **`quotes`** — lines, totals, `signature`, `expires_at`, single-use `status`.
+  "Single-use" is enforced by an atomic claim (`UPDATE … WHERE status='open'`)
+  taken *before* the gateway call, not by a read in the guard and a write after
+  it — with two awaited round-trips in between, that window let ten concurrent
+  callers share one approval.
 - **`consents`** — `cap_minor`, `scope`, `granted_by`, `expires_at`, `revoked_at`.
   Nothing mutates `cap_minor` after the grant.
 - **`orders`** — `idempotency_key` is `UNIQUE`; that constraint is the concurrency
   control. Holds both `razorpay_order_id` and `razorpay_payment_link_id`.
+  Statuses: `created` → `awaiting_payment` → `paid` / `failed` / `mismatch` /
+  `expired`. `paid` is never downgraded; `mismatch` means money arrived that
+  does not match the order and a human is needed.
 - **`agents`** — `verified` separates a proven key from a self-asserted name.
   Unverified agents cannot have their caps raised.
 - **`audit_log`** — append-only, `prev_hash` + `hash` per row.
@@ -277,8 +284,17 @@ Scoping a list is the easy half; the half that matters is every route addressed
 by an **ID**, where there is no list to filter. `owns()` guards those, and
 answers **404** rather than 403 so an unreachable identifier is not confirmed to
 exist. It is not relaxed on the open sandbox, which is where strangers actually
-share an instance. `SECURITY.md` has the detail; `FAILURES.md` §10 has the story
-of getting it wrong first.
+share an instance.
+
+Reading across tenants and **acting** across tenants are separate powers. A
+visitor may hand themselves the platform role or reviewer mode and see
+everything; only the operator token — the deploy secret — may approve, reject or
+revoke another tenant's records. Audit rows take their workspace from the row's
+subject rather than from an optional argument, because attribution that a call
+site can forget is not a boundary.
+
+`SECURITY.md` has the detail; `FAILURES.md` §10 and §11 have the story of
+getting it wrong twice.
 
 ---
 

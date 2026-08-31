@@ -86,6 +86,26 @@ export async function call<T>(path: string, opts: CallOptions = {}): Promise<T> 
   if (Date.now() < BREAKER.openUntil) throw new CircuitOpenError(BREAKER.openUntil);
 
   const doFetch = opts.fetchImpl ?? fetch;
+  const method = opts.method ?? 'GET';
+  /**
+   * Only a GET may be repeated freely.
+   *
+   * POST /orders and POST /payment_links are not idempotent and we send no
+   * idempotency key, so a request that SUCCEEDED at Razorpay but whose
+   * response was lost -- a timeout, a dropped connection, a 502 from a proxy
+   * in front of a request that already ran -- creates a second real Order or a
+   * second real, payable Payment Link when it is retried. Only the last
+   * response is returned, so the orphan link is live, carries our reference
+   * id, and is invisible to us. Worse, because reference ids must be unique,
+   * the retry usually comes back 4xx and the checkout is marked failed while a
+   * payable link exists.
+   *
+   * This module's own stated principle is that "a request that may or may not
+   * have taken money is worse than one that definitely did not", and blanket
+   * retries contradicted it. A 429 is the one safe case: Razorpay rejects it
+   * before doing any work.
+   */
+  const repeatable = method === 'GET';
   const attempts = opts.attempts ?? 3;
   let lastErr: unknown;
 
@@ -94,7 +114,7 @@ export async function call<T>(path: string, opts: CallOptions = {}): Promise<T> 
     const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 15_000);
     try {
       const res = await doFetch(`${BASE}${path}`, {
-        method: opts.method ?? 'GET',
+        method,
         headers: {
           authorization: authHeader(),
           'content-type': 'application/json',
@@ -110,7 +130,8 @@ export async function call<T>(path: string, opts: CallOptions = {}): Promise<T> 
       if (!res.ok) {
         const err = (parsed.error ?? {}) as { code?: string; description?: string };
         const rzpErr = new RazorpayError(res.status, err.code ?? 'unknown', err.description ?? text.slice(0, 200));
-        if (!rzpErr.retryable || attempt === attempts) {
+        const mayRepeat = rzpErr.retryable && (repeatable || res.status === 429);
+        if (!mayRepeat || attempt === attempts) {
           if (rzpErr.retryable) recordFailure();
           throw rzpErr;
         }
@@ -126,6 +147,9 @@ export async function call<T>(path: string, opts: CallOptions = {}): Promise<T> 
       if (err instanceof RazorpayError) throw err;
       recordFailure();
       lastErr = err;
+      // A network failure on a write is ambiguous: the charge may exist.
+      // Repeating it is how one checkout becomes two payable links.
+      if (!repeatable) break;
       if (attempt === attempts) break;
       await sleep(200 * 2 ** (attempt - 1));
     } finally {
@@ -138,7 +162,7 @@ export async function call<T>(path: string, opts: CallOptions = {}): Promise<T> 
 
 export interface RzpOrder { id: string; amount: number; currency: string; receipt?: string; status: string; }
 export interface RzpPaymentLink {
-  id: string; short_url: string; status: string; amount: number; amount_paid?: number;
+  id: string; short_url: string; status: string; amount: number; amount_paid?: number; currency?: string;
   reference_id?: string; order_id?: string;
   payments?: Array<{ payment_id: string; status: string; amount: number; created_at?: number }> | null;
 }

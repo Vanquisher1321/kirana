@@ -85,7 +85,12 @@ export function readCookie(header: string | undefined, name: string): string {
   if (!header) return '';
   for (const part of header.split(';')) {
     const [k, ...rest] = part.trim().split('=');
-    if (k === name) return decodeURIComponent(rest.join('='));
+    if (k === name) {
+      // `Cookie: kirana_ws=%` used to throw URIError out of the onRequest hook
+      // and 500 every /api route. A cookie is attacker-supplied text; a
+      // malformed one means "no session", not "the server is broken".
+      try { return decodeURIComponent(rest.join('=')); } catch { return ''; }
+    }
   }
   return '';
 }
