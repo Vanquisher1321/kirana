@@ -85,14 +85,7 @@ function Overview({ shop, picker, data, refresh, onBlocked }: { shop?: Merchant;
                   : 'No model guessed at any price. Buying agents are told this.'}
               </span>
             </div>
-            {shop.warnings.length > 0 && (
-              <div className="tiny" style={{ marginTop: 14 }}>
-                <strong>We skipped {shop.warnings.length} thing{shop.warnings.length === 1 ? '' : 's'} rather than guess:</strong>
-                <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
-                  {shop.warnings.map((w, i) => <li key={i}>{w}</li>)}
-                </ul>
-              </div>
-            )}
+            {shop.warnings.length > 0 && <SkipSummary warnings={shop.warnings} />}
           </>
         ) : <Empty>Connect a shop below to get your AI address.</Empty>}
       </Card>
@@ -313,5 +306,42 @@ function Record({ data }: Pick<PersonaProps, 'data'>) {
         })}
       </Card>
     </>
+  );
+}
+
+/**
+ * "We skipped 52 things rather than guess" is the honest line. Printing all 52
+ * underneath it is not honesty, it is a wall: a real catalogue has dozens of
+ * zero-priced placeholder variants, and on Blue Tokai the list buried the
+ * entire dashboard under one repeated sentence. Group by reason, show the
+ * shape, and put the detail behind a click for anyone who wants it.
+ */
+function SkipSummary({ warnings }: { warnings: string[] }) {
+  const [open, setOpen] = useState(false);
+  const groups = new Map<string, number>();
+  for (const w of warnings) {
+    const reason = /price is not a positive amount/i.test(w) ? 'no usable price'
+      : /no usable variants/i.test(w) ? 'no buyable options'
+      : /unparseable price/i.test(w) ? 'price we could not read'
+      : 'other';
+    groups.set(reason, (groups.get(reason) ?? 0) + 1);
+  }
+  const summary = [...groups.entries()].sort((a, b) => b[1] - a[1]).map(([r, n]) => `${n} ${r}`).join(' · ');
+  return (
+    <div className="tiny" style={{ marginTop: 14 }}>
+      <strong>We skipped {warnings.length} thing{warnings.length === 1 ? '' : 's'} rather than guess</strong>
+      <div style={{ marginTop: 4, opacity: 0.75 }}>{summary}</div>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{ background: 'none', border: 0, padding: '6px 0 0', cursor: 'pointer', color: 'inherit', textDecoration: 'underline', font: 'inherit', opacity: 0.7 }}
+      >
+        {open ? 'Hide details' : 'Show each one'}
+      </button>
+      {open && (
+        <ul style={{ margin: '6px 0 0 18px', padding: 0, maxHeight: 200, overflowY: 'auto' }}>
+          {warnings.map((w, i) => <li key={i}>{w}</li>)}
+        </ul>
+      )}
+    </div>
   );
 }
