@@ -115,6 +115,12 @@ export function rejectConsent(consentId: string, by: string): Consent {
  * than denormalised onto the consent row, so it cannot drift out of sync with
  * the shop the basket actually belongs to.
  */
+/**
+ * The approvals a visitor may act on: their own shops', plus the instance's
+ * own seeded shop, which belongs to nobody and is shared by everyone on the
+ * sandbox. Without the second half a visitor shopping the demo shop could be
+ * asked for permission and have no way to give it.
+ */
 export function listPendingConsents(workspaceId?: string | null): Consent[] {
   const rows = workspaceId === undefined
     ? db.prepare("SELECT * FROM consents WHERE status='pending' ORDER BY expires_at ASC").all()
@@ -122,7 +128,7 @@ export function listPendingConsents(workspaceId?: string | null): Consent[] {
         `SELECT c.* FROM consents c
          JOIN quotes q ON q.id = c.quote_id
          JOIN merchants m ON m.id = q.merchant_id
-         WHERE c.status='pending' AND m.workspace_id IS ?
+         WHERE c.status='pending' AND (m.workspace_id IS ? OR m.workspace_id IS NULL)
          ORDER BY c.expires_at ASC`,
       ).all(workspaceId);
   return (rows as Record<string, unknown>[]).map(rowToConsent);

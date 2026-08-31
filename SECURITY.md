@@ -194,6 +194,19 @@ exists.
 This is *not* relaxed in demo mode. The open sandbox is precisely where
 strangers share one instance, so it is precisely where it matters most.
 
+The shop this server **seeds on boot** belongs to no workspace, and records that
+hang off a shop — quotes, approvals, orders — inherit their workspace from it.
+Under a strict `owner === me` rule that made the demo shop unusable: an agent
+shopping it asks for permission and no human can grant it. Found on the deployed
+instance, where the approval queue read 0 and the approve button answered 404 —
+the pitch dead-ending on its own central claim.
+
+So a record whose shop is unowned is shared: a shared demo shop has a shared
+approval queue, which is what a sandbox is. The rule derives from the **shop**,
+never from a bare null — an agent row gets a null workspace by accident, and
+treating that as shared let one visitor raise another's spending caps. A test
+caught it within a minute of the blanket version going in.
+
 Two things stay deliberately wide:
 
 - **Discovery.** `GET /api/merchants?scope=directory` lists every shop. Hiding

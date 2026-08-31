@@ -271,10 +271,36 @@ export function buildApp(): FastifyInstance {
   ): boolean => {
     // NOT relaxed in demo mode. The open sandbox is exactly where strangers
     // share one instance, so it is exactly where one visitor approving
-    // another's spending would matter most.
+    // another visitor's spending would matter most.
     if (mayActCrossTenant(request)) return true;
     return ownerWorkspace !== null && ownerWorkspace === ws(request);
   };
+
+  /**
+   * The same check, for records that hang off a SHOP.
+   *
+   * Quotes, approvals and orders inherit their workspace from the merchant,
+   * and the shop this server seeds on boot belongs to nobody. Under a strict
+   * `owner === me` rule that made it unusable: an agent shopping the demo shop
+   * asks for permission and no human on earth can grant it. Verified on the
+   * deployed instance -- the approval queue read 0 and the approve button
+   * answered 404, which is the pitch dead-ending on its own central claim.
+   *
+   * A shared demo shop has a shared approval queue; that is what a sandbox is,
+   * and it is bounded by the same test credentials and hard caps as everything
+   * else. The guarantee that matters is untouched: a shop a visitor CONNECTED
+   * is theirs, and no other visitor can act on it.
+   *
+   * This is deliberately NOT the rule for agents. An agent row gets a null
+   * workspace by accident -- `ensureAgent` is called without one from the
+   * anonymous MCP path -- rather than by being the instance's own. Treating
+   * that null as "shared" let one visitor raise another's spending caps, which
+   * a test caught the moment the blanket version went in.
+   */
+  const ownsViaShop = (
+    request: { workspaceId?: string; operator?: boolean },
+    ownerWorkspace: string | null,
+  ): boolean => (ownerWorkspace === null ? true : owns(request, ownerWorkspace));
 
   /**
    * Who approved this, for the audit trail.
@@ -487,7 +513,7 @@ export function buildApp(): FastifyInstance {
 
   app.post('/api/approvals/:id/approve', async (request, reply) => {
     const { id } = request.params as { id: string };
-    if (!owns(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
+    if (!ownsViaShop(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
     try { return approveConsent(id, approver(request as never)); }
     catch (err) {
       if (err instanceof ConsentError) return reply.code(409).send({ error: err.code, message: err.message });
@@ -497,19 +523,19 @@ export function buildApp(): FastifyInstance {
 
   app.post('/api/approvals/:id/reject', async (request, reply) => {
     const { id } = request.params as { id: string };
-    if (!owns(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
+    if (!ownsViaShop(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
     return rejectConsent(id, approver(request as never));
   });
 
   app.post('/api/approvals/:id/revoke', async (request, reply) => {
     const { id } = request.params as { id: string };
-    if (!owns(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
+    if (!ownsViaShop(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
     return revokeConsent(id, approver(request as never));
   });
 
   app.get('/api/approvals/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    if (!owns(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
+    if (!ownsViaShop(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
     const c = getConsent(id);
     if (!c) return reply.code(404).send({ error: 'not_found' });
     const q = getQuote(c.quoteId);
@@ -535,7 +561,7 @@ export function buildApp(): FastifyInstance {
 
   app.get('/api/orders/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    if (!owns(request as never, orderWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
+    if (!ownsViaShop(request as never, orderWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
     const o = getOrder(id);
     if (!o) return reply.code(404).send({ error: 'not_found' });
     return { ...o, amountFormatted: formatInr(Number(o.amount_minor)), audit: forSubject(id, scopeFor(request as never)) };

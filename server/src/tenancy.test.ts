@@ -223,3 +223,53 @@ test('SECURITY: the audit feed never hands one visitor another visitor’s sessi
   assert.equal(feed.includes(aliceWs), false, 'no scope may reveal a session id');
   assert.match(feed, /ws:[0-9a-f]{8}/, 'rows stay attributable by a one-way reference');
 });
+
+test("DEMO: a visitor can approve against the instance's own seeded shop", async () => {
+  // The shop this server seeds on boot belongs to no workspace. Under a strict
+  // owner===me rule nobody could ever approve against it, so a visitor shopping
+  // the demo shop hit a dead end: the agent asks for permission and no human on
+  // earth can grant it. This was found on the deployed instance, not in a test.
+  const seeded = await ingestStorefront('seeded-shop.example', { fetchImpl: fixtureFetch as never });
+  const merchant = getMerchant(seeded.merchantId)!;
+  assert.equal(merchant.workspaceId ?? null, null, 'a boot-seeded shop is owned by nobody');
+
+  const variant = searchCatalog(merchant.id, { limit: 1 })[0]!.variants[0]!;
+  const quote = createQuote(merchant.id, [{ variantId: variant.id, quantity: 1 }], 'demo-agent');
+  const pending = requestConsent({ quoteId: quote.id, agentId: 'demo-agent', capMinor: 5_000_00, scope: merchant.id });
+
+  const visitor = new Visitor();
+  await visitor.role('shopper');
+
+  const queue = await (await visitor.fetch('/api/approvals')).json() as Array<{ id: string }>;
+  assert.ok(queue.some((c) => c.id === pending.id), 'the shared demo queue is visible to a visitor');
+
+  const res = await visitor.fetch(`/api/approvals/${pending.id}/approve`, { method: 'POST', body: '{}' });
+  assert.equal(res.status, 200, 'and they can actually say yes');
+  assert.equal((await res.json() as { status: string }).status, 'granted');
+});
+
+test("TENANCY: sharing the demo shop did not reopen the door to owned shops", async () => {
+  // The important half, restated after the change above: a shop a visitor
+  // CONNECTED is still theirs alone.
+  const res = await mallory.fetch(`/api/approvals/${aliceConsentId}/approve`, {
+    method: 'POST', body: JSON.stringify({ by: 'mallory' }),
+  });
+  assert.equal(res.status, 404, "an owned shop's approvals stay private");
+  const still = await (await alice.fetch(`/api/approvals/${aliceConsentId}`)).json() as { status: string };
+  assert.equal(still.status, 'pending');
+});
+
+test("SHARING THE DEMO SHOP DID NOT SHARE AGENTS", async () => {
+  // The first version of the fix treated any null workspace as "the
+  // instance's own", which is true of a boot-seeded shop and false of an
+  // agent: ensureAgent is called without a workspace from the anonymous MCP
+  // path, so agents get null by accident. Under the blanket rule one visitor
+  // could raise another visitor's spending caps. This test is why the rule
+  // now derives from the SHOP rather than from a bare null.
+  const caps = await mallory.fetch('/api/agents/alice-agent/caps', {
+    method: 'POST', body: JSON.stringify({ perOrderMinor: 100_000_00, dailyMinor: 100_000_00 }),
+  });
+  assert.equal(caps.status, 404, "caps on someone else's agent stay out of reach");
+  const key = await mallory.fetch('/api/agents/demo-agent/key', { method: 'POST', body: JSON.stringify({ label: 'stolen' }) });
+  assert.equal(key.status, 404, 'and an unowned agent is not a free agent');
+});
