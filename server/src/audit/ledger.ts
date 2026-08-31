@@ -90,8 +90,14 @@ export function list(limit = 200, workspaceId?: string | null): AuditRow[] {
   return (rows as Record<string, unknown>[]).map(toRow);
 }
 
-export function forSubject(subjectId: string): AuditRow[] {
-  const rows = db.prepare('SELECT * FROM audit_log WHERE subject_id = ? ORDER BY seq ASC').all(subjectId) as Record<string, unknown>[];
+export function forSubject(subjectId: string, workspaceId?: string | null): AuditRow[] {
+  // `undefined` means every tenant (the platform view). A string -- or an
+  // explicit null for the unclaimed rows -- confines the read to one workspace.
+  const rows = (workspaceId === undefined
+    ? db.prepare('SELECT * FROM audit_log WHERE subject_id = ? ORDER BY seq ASC').all(subjectId)
+    : db
+        .prepare('SELECT * FROM audit_log WHERE subject_id = ? AND workspace_id IS ? ORDER BY seq ASC')
+        .all(subjectId, workspaceId)) as Record<string, unknown>[];
   return rows.map(toRow);
 }
 

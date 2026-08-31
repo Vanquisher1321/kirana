@@ -254,6 +254,31 @@ Nine tables. The ones that carry the argument:
 - **`agents`** — `verified` separates a proven key from a self-asserted name.
   Unverified agents cannot have their caps raised.
 - **`audit_log`** — append-only, `prev_hash` + `hash` per row.
+- **`workspaces`** — one per visitor, created silently on first contact, carried
+  in an HttpOnly `SameSite=Lax` cookie. Every table above carries the
+  `workspace_id` that created the row.
+
+---
+
+## Tenancy
+
+The console has three audiences and one database, so every read is scoped by the
+workspace behind the request.
+
+| Caller | Sees |
+| --- | --- |
+| Merchant | The shops they connected, and everything derived from them |
+| Shopper | Their own approvals, orders and limits; the shop **directory** is public |
+| Razorpay (platform) | Across every workspace |
+| Reviewer mode | The persona's own view, widened on request — for judges |
+| Operator token | Across every workspace by default |
+
+Scoping a list is the easy half; the half that matters is every route addressed
+by an **ID**, where there is no list to filter. `owns()` guards those, and
+answers **404** rather than 403 so an unreachable identifier is not confirmed to
+exist. It is not relaxed on the open sandbox, which is where strangers actually
+share an instance. `SECURITY.md` has the detail; `FAILURES.md` §10 has the story
+of getting it wrong first.
 
 ---
 

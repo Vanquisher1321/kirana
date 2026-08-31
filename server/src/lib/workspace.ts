@@ -31,6 +31,12 @@ export interface Workspace {
   id: string;
   label: string;
   role: Role | null;
+  /**
+   * Reviewer mode. Off by default, so the default experience is the honest one:
+   * you are one kind of account and you see one console, like a real user. A
+   * reviewer turns it on deliberately to see all three.
+   */
+  fullAccess: boolean;
   createdAt: string;
   lastSeenAt: string;
 }
@@ -40,6 +46,7 @@ function row(r: Record<string, unknown>): Workspace {
   return {
     id: String(r.id), label: String(r.label),
     role: role && (ROLES as string[]).includes(role) ? role as Role : null,
+    fullAccess: Number(r.full_access ?? 0) === 1,
     createdAt: String(r.created_at), lastSeenAt: String(r.last_seen_at),
   };
 }
@@ -48,7 +55,7 @@ export function createWorkspace(label = 'Workspace'): Workspace {
   const id = `ws_${randomBytes(24).toString('base64url')}`;
   const at = nowIso();
   db.prepare('INSERT INTO workspaces (id, label, created_at, last_seen_at) VALUES (?,?,?,?)').run(id, label, at, at);
-  return { id, label, role: null, createdAt: at, lastSeenAt: at };
+  return { id, label, role: null, fullAccess: false, createdAt: at, lastSeenAt: at };
 }
 
 export function getWorkspace(id: string): Workspace | null {
@@ -61,6 +68,11 @@ export function setWorkspaceRole(id: string, role: Role): Workspace | null {
   if (!(ROLES as string[]).includes(role)) return null;
   db.prepare('UPDATE workspaces SET role = ?, label = ? WHERE id = ?')
     .run(role, role === 'platform' ? 'Razorpay' : role === 'merchant' ? 'Merchant' : 'Shopper', id);
+  return getWorkspace(id);
+}
+
+export function setFullAccess(id: string, enabled: boolean): Workspace | null {
+  db.prepare('UPDATE workspaces SET full_access = ? WHERE id = ?').run(enabled ? 1 : 0, id);
   return getWorkspace(id);
 }
 

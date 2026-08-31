@@ -238,6 +238,8 @@ for (const stmt of [
   'ALTER TABLE audit_log ADD COLUMN workspace_id TEXT',
   // Who this workspace is. Null until the visitor says.
   'ALTER TABLE workspaces ADD COLUMN role TEXT',
+  // Reviewer mode: lets one workspace see all three consoles at once.
+  'ALTER TABLE workspaces ADD COLUMN full_access INTEGER NOT NULL DEFAULT 0',
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_merchants_public ON merchants(public_id)',
   'CREATE INDEX IF NOT EXISTS idx_merchants_ws ON merchants(workspace_id)',
   'CREATE INDEX IF NOT EXISTS idx_orders_ws ON orders(workspace_id)',

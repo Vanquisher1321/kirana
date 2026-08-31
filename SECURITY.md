@@ -143,6 +143,43 @@ Unexpected errors are logged, not returned. Config reporting shows whether a
 secret exists, never its value. The server refuses to start with a live
 Razorpay key.
 
+### One visitor cannot reach another visitor's records
+
+Every visitor gets a workspace on first contact — a `ws_...` identifier in an
+HttpOnly, `SameSite=Lax` cookie, issued silently, no signup. Shops, agents,
+orders, approvals and audit rows all carry the workspace that created them, and
+every list endpoint filters on it.
+
+Filtering lists is the easy half. The dangerous half is every route that takes
+an **ID**, because there the ID *is* the query and there is no list to filter:
+
+    POST /api/approvals/:id/approve
+
+Without a check, any visitor could grant another visitor's spending by supplying
+an identifier — the human half of the loop, bypassed entirely. `owns()` guards
+approve, reject, revoke, `GET /approvals/:id`, `GET /orders/:id`,
+`POST /agents/:id/caps` and `POST /agents/:id/key`. A caller from the wrong
+workspace gets **404, not 403**, so the endpoint does not confirm that the ID
+exists.
+
+This is *not* relaxed in demo mode. The open sandbox is precisely where
+strangers share one instance, so it is precisely where it matters most.
+
+Two things stay deliberately wide:
+
+- **Discovery.** `GET /api/merchants?scope=directory` lists every shop. Hiding
+  it would hide nothing — the MCP endpoint is already open to the world — while
+  breaking the premise that any agent can shop any merchant. Only the shop
+  index is public; everything derived from a shop stays scoped.
+- **The platform view.** Reading across tenants is what a platform console *is*.
+  It requires the platform role or reviewer mode, and `?scope=platform` alone is
+  a request, not a permission.
+
+The operator token is treated as platform reach by default. Whoever holds the
+deploy secret is running the instance, not visiting it; requiring them to append
+`?scope=platform` to every call would answer `200` with an empty list and look
+exactly like data loss.
+
 ## Known gaps
 
 Stated plainly, because a security document that claims completeness is not
@@ -153,9 +190,12 @@ credible.
   and would not hold across multiple instances.
 - **The console token is a single shared secret.** No users, roles, rotation or
   expiry.
-- **No CSRF tokens.** The console is token-authenticated rather than
-  cookie-authenticated, so a cross-site request cannot borrow ambient
-  credentials — but this would need revisiting if cookies were introduced.
+- **No CSRF tokens.** Cookies now exist, so this claim had to be rewritten:
+  the workspace cookie is `SameSite=Lax`, which browsers do not attach to
+  cross-site POSTs, and every state-changing route here is a POST. That is the
+  whole defence. It is adequate and it is not belt-and-braces — a real
+  deployment should add a double-submit token rather than rely on one browser
+  behaviour.
 - **Ingestion trusts merchant content.** Product text from a shop is stored and
   shown to buyer agents; it is stripped of markup, but a hostile merchant could
   still attempt prompt injection against a buyer agent through a product
@@ -171,5 +211,13 @@ credible.
   proves nothing was edited *in place*; it does not defend against an attacker
   who owns the file.
 - **The public sandbox is deliberately unauthenticated.** Test credentials only,
-  hard caps still enforced, and no real money can move — but anyone with the URL
-  can approve a spend or pause the demo.
+  hard caps still enforced, no real money can move. Workspaces mean a visitor
+  can only approve their *own* spending, but two things remain open by design:
+  anyone may select the Razorpay persona and get the cross-tenant read view
+  (judges need it, and there is nothing confidential in a test-mode sandbox),
+  and the stop button is global — so on the sandbox it auto-releases after a few
+  minutes rather than letting one visitor freeze the demo for everyone after
+  them.
+- **Workspaces are cookies, not accounts.** Clearing cookies loses the
+  workspace, and anyone holding the cookie value is that workspace. This is
+  session-shaped tenancy for a sandbox, not authentication.

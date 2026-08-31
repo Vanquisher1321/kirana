@@ -267,3 +267,14 @@ tbody tr { transition: background .12s; }
   background: #111827; border: 1px solid #1F2937; color: #E5E7EB;
   font-size: 12px; font-weight: 600;
 }
+
+/* Reviewer mode. Discoverable but clearly not part of the product — a real
+   account never sees more than its own console. */
+.reviewbtn {
+  font-size: 11.5px; font-weight: 600; color: #A5B4FC;
+  border: 1px dashed rgba(165, 180, 252, .4); border-radius: 8px;
+  padding: 5px 11px; transition: background .14s, border-color .14s;
+}
+.reviewbtn:hover { background: rgba(99, 102, 241, .12); border-color: rgba(165, 180, 252, .7); }
+.reviewbtn:focus-visible { outline: 2px solid #A5B4FC; outline-offset: 2px; }
+.reviewbtn.off { color: #9CA3AF; border-color: #1F2937; }

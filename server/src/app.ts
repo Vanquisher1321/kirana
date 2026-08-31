@@ -6,15 +6,15 @@ import { getMerchant, getMerchantForMcp, listMerchants, latestRun, searchCatalog
 import { buildMcpServer } from './mcp/server.ts';
 import { list as auditList, verify as auditVerify, forSubject, record } from './audit/ledger.ts';
 import { formatInr } from './lib/money.ts';
-import { listPendingConsents, approveConsent, rejectConsent, revokeConsent, getConsent, ConsentError } from './checkout/consent.ts';
+import { listPendingConsents, approveConsent, rejectConsent, revokeConsent, getConsent, consentWorkspace, ConsentError } from './checkout/consent.ts';
 import { getQuote } from './checkout/quote.ts';
-import { listOrders, getOrder, settleOrder } from './checkout/checkout.ts';
+import { listOrders, getOrder, orderWorkspace, settleOrder } from './checkout/checkout.ts';
 import { reconcile } from './checkout/reconcile.ts';
-import { listAgents, setAgentCaps, issueAgentKey, agentForKey, ensureAgent } from './checkout/agents.ts';
+import { listAgents, getAgent, setAgentCaps, issueAgentKey, agentForKey, agentWorkspace, ensureAgent } from './checkout/agents.ts';
 import { secretEquals, rateLimit } from './lib/security.ts';
 import { KILL_SWITCH, engageKillSwitch, releaseKillSwitch, killSwitchActive } from './checkout/guard.ts';
 import { enforceMerchantCap } from './lib/selfheal.ts';
-import { COOKIE, ROLES, cookieHeader, createWorkspace, getWorkspace, readCookie, setWorkspaceRole, touchWorkspace, type Role } from './lib/workspace.ts';
+import { COOKIE, ROLES, cookieHeader, createWorkspace, getWorkspace, readCookie, setFullAccess, setWorkspaceRole, touchWorkspace, type Role } from './lib/workspace.ts';
 import { circuitState } from './razorpay/client.ts';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -80,26 +80,36 @@ export function buildApp() {
       } else {
         touchWorkspace(ws.id);
       }
-      const req = request as unknown as { workspaceId: string; workspaceRole: Role | null };
+      const req = request as unknown as {
+        workspaceId: string; workspaceRole: Role | null; fullAccess: boolean; operator: boolean;
+      };
       req.workspaceId = ws.id;
       req.workspaceRole = ws.role;
+      req.fullAccess = ws.fullAccess;
+      req.operator = false;
 
       const header = String(request.headers.authorization ?? '');
       const presented = header.startsWith('Bearer ') ? header.slice(7) : String(request.headers['x-kirana-console'] ?? '');
       const wantsPlatform = (request.query as { scope?: string } | undefined)?.scope === 'platform';
 
+      // The operator token is the deploy secret. Whoever holds it is the person
+      // running this instance, not a visitor -- so it carries platform reach.
+      // (An empty configured token must never match an empty header.)
+      const isOperator = config.consoleToken.length > 0 && secretEquals(presented, config.consoleToken);
+      if (isOperator) { req.fullAccess = true; req.operator = true; }
+
       // A sandbox is meant to be driven, not admired. Test credentials only.
       if (config.isDemo) return;
 
       // Cross-tenant reads are privileged even though ordinary reads are open.
-      if (wantsPlatform && !secretEquals(presented, config.consoleToken)) {
+      if (wantsPlatform && !isOperator) {
         return reply.code(401).send({
           error: 'unauthorized',
           message: 'The platform view reads across every workspace and needs the operator token.',
         });
       }
 
-      if (secretEquals(presented, config.consoleToken)) return;
+      if (isOperator) return;
 
       // Locked: reading stays open so the console is legible, but every
       // endpoint that spends, approves, ingests, pauses or issues a key is a
@@ -174,10 +184,51 @@ export function buildApp() {
    * deployment runs KIRANA_ACCESS=locked, where reaching it needs the operator
    * token like every other privileged action.
    */
-  const scopeFor = (request: { workspaceId?: string; workspaceRole?: Role | null; query?: unknown }): string | null | undefined => {
+  const scopeFor = (request: {
+    workspaceId?: string; workspaceRole?: Role | null; fullAccess?: boolean; operator?: boolean; query?: unknown;
+  }): string | null | undefined => {
+    // A caller holding the deploy secret is running this instance, not visiting
+    // it. Making the operator append ?scope=platform to every call is a trap:
+    // the endpoint would answer 200 with an empty list and look like data loss.
+    if (request.operator) return undefined;
     const wantsAll = (request.query as { scope?: string } | undefined)?.scope === 'platform';
-    // Asking is not enough — the workspace must actually BE the platform.
-    return wantsAll && request.workspaceRole === 'platform' ? undefined : ws(request);
+    // Asking is not enough — the workspace must BE the platform, or have
+    // deliberately turned on reviewer mode.
+    const mayReadAll = request.workspaceRole === 'platform' || request.fullAccess === true;
+    return wantsAll && mayReadAll ? undefined : ws(request);
+  };
+
+  /** Shops only: `?scope=directory` is the public storefront index. */
+  const directoryScope = (request: {
+    workspaceId?: string; workspaceRole?: Role | null; fullAccess?: boolean; operator?: boolean; query?: unknown;
+  }): string | null | undefined =>
+    (request.query as { scope?: string } | undefined)?.scope === 'directory' ? undefined : scopeFor(request);
+
+  /**
+   * May this caller touch a record that belongs to `ownerWorkspace`?
+   *
+   * Reads scope themselves (a filtered list simply omits other tenants). But a
+   * route that takes an ID -- approve, reject, revoke, rotate a key -- has no
+   * list to filter: the ID IS the query. Without this check any visitor could
+   * approve another visitor's spending, which is the entire human half of the
+   * loop, bypassed by guessing an ID.
+   *
+   * Cross-tenant access is allowed only for the platform persona and for
+   * reviewer mode, matching `scopeFor`. Everyone else gets a 404 rather than a
+   * 403, so the endpoint does not confirm that the ID exists.
+   */
+  const mayCross = (request: { workspaceRole?: Role | null; fullAccess?: boolean }) =>
+    request.workspaceRole === 'platform' || request.fullAccess === true;
+
+  const owns = (
+    request: { workspaceId?: string; workspaceRole?: Role | null; fullAccess?: boolean },
+    ownerWorkspace: string | null,
+  ): boolean => {
+    // NOT relaxed in demo mode. The open sandbox is exactly where strangers
+    // share one instance, so it is exactly where one visitor approving
+    // another's spending would matter most.
+    if (mayCross(request)) return true;
+    return ownerWorkspace !== null && ownerWorkspace === ws(request);
   };
 
   // -------------------------------------------------------------------------
@@ -185,15 +236,41 @@ export function buildApp() {
   // -------------------------------------------------------------------------
 
   app.get('/api/session', async (request) => {
-    const r = request as unknown as { workspaceId: string; workspaceRole: Role | null };
+    const r = request as unknown as { workspaceId: string; workspaceRole: Role | null; fullAccess: boolean };
     return {
       workspaceId: r.workspaceId,
       role: r.workspaceRole,
-      // Switching roles is a DEMO capability, plainly labelled as one. On a real
-      // deployment your role is a property of your account and does not change
-      // because you clicked something.
-      canSwitchRole: config.isDemo,
+      fullAccess: r.fullAccess,
+      // Reviewer mode exists only on the sandbox. On a real deployment your
+      // role is a property of your account and there is nothing to switch.
+      canEnableFullAccess: config.isDemo,
     };
+  });
+
+  /**
+   * Reviewer mode.
+   *
+   * The default experience is deliberately narrow — one account, one console —
+   * because that is what a real merchant or shopper gets. Someone evaluating
+   * the product needs to see all three, so they turn this on explicitly and it
+   * is labelled as what it is, rather than every visitor getting a tab bar no
+   * real user would ever have.
+   */
+  app.post('/api/session/full-access', async (request, reply) => {
+    if (!config.isDemo) {
+      return reply.code(403).send({
+        error: 'not_available',
+        message: 'Reviewer mode only exists on the public sandbox.',
+      });
+    }
+    const r = request as unknown as { workspaceId: string };
+    const enabled = (request.body as { enabled?: boolean } | undefined)?.enabled !== false;
+    const updated = setFullAccess(r.workspaceId, enabled);
+    record({
+      actor: `workspace:${r.workspaceId}`, action: enabled ? 'session.reviewer_mode_on' : 'session.reviewer_mode_off',
+      subjectId: r.workspaceId, outcome: 'ok', detail: {}, workspaceId: r.workspaceId,
+    });
+    return updated;
   });
 
   app.post('/api/session/role', async (request, reply) => {
@@ -225,8 +302,16 @@ export function buildApp() {
   // Console API
   // ---------------------------------------------------------------------------
 
+  /**
+   * Shops are the one thing that is deliberately PUBLIC.
+   *
+   * The whole premise is that any agent can shop any merchant, and the MCP
+   * endpoint is already open to the world -- so hiding the directory from a
+   * shopper would hide nothing while breaking discovery. Everything derived
+   * from a shop (its orders, approvals, agents, audit) stays scoped.
+   */
   app.get('/api/merchants', async (request) =>
-    listMerchants(scopeFor(request as never)).map((m) => {
+    listMerchants(directoryScope(request as never)).map((m) => {
       const run = latestRun(m.id);
       return {
         ...m,
@@ -278,7 +363,9 @@ export function buildApp() {
 
   app.get('/api/audit', async (request) => {
     const { subject, limit } = request.query as { subject?: string; limit?: string };
-    return subject ? forSubject(subject) : auditList(Number(limit ?? 200), scopeFor(request as never));
+    return subject
+      ? forSubject(subject, scopeFor(request as never))
+      : auditList(Number(limit ?? 200), scopeFor(request as never));
   });
 
   app.get('/api/audit/verify', async () => auditVerify());
@@ -287,8 +374,8 @@ export function buildApp() {
   // Approvals — the human half of the loop.
   // -------------------------------------------------------------------------
 
-  app.get('/api/approvals', async () =>
-    listPendingConsents().map((c) => {
+  app.get('/api/approvals', async (request) =>
+    listPendingConsents(scopeFor(request as never)).map((c) => {
       const q = getQuote(c.quoteId);
       return {
         ...c,
@@ -310,6 +397,7 @@ export function buildApp() {
 
   app.post('/api/approvals/:id/approve', async (request, reply) => {
     const { id } = request.params as { id: string };
+    if (!owns(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
     const by = (request.body as { by?: string } | undefined)?.by ?? 'om';
     try { return approveConsent(id, by); }
     catch (err) {
@@ -318,18 +406,21 @@ export function buildApp() {
     }
   });
 
-  app.post('/api/approvals/:id/reject', async (request) => {
+  app.post('/api/approvals/:id/reject', async (request, reply) => {
     const { id } = request.params as { id: string };
+    if (!owns(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
     return rejectConsent(id, (request.body as { by?: string } | undefined)?.by ?? 'om');
   });
 
-  app.post('/api/approvals/:id/revoke', async (request) => {
+  app.post('/api/approvals/:id/revoke', async (request, reply) => {
     const { id } = request.params as { id: string };
+    if (!owns(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
     return revokeConsent(id, (request.body as { by?: string } | undefined)?.by ?? 'om');
   });
 
   app.get('/api/approvals/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
+    if (!owns(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
     const c = getConsent(id);
     if (!c) return reply.code(404).send({ error: 'not_found' });
     const q = getQuote(c.quoteId);
@@ -355,9 +446,10 @@ export function buildApp() {
 
   app.get('/api/orders/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
+    if (!owns(request as never, orderWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
     const o = getOrder(id);
     if (!o) return reply.code(404).send({ error: 'not_found' });
-    return { ...o, amountFormatted: formatInr(Number(o.amount_minor)), audit: forSubject(id) };
+    return { ...o, amountFormatted: formatInr(Number(o.amount_minor)), audit: forSubject(id, scopeFor(request as never)) };
   });
 
   app.get('/api/agents', async (request) =>
@@ -366,6 +458,7 @@ export function buildApp() {
 
   app.post('/api/agents/:id/caps', async (request, reply) => {
     const { id } = request.params as { id: string };
+    if (getAgent(id) && !owns(request as never, agentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
     const b = request.body as { perOrderMinor?: number; dailyMinor?: number };
     try {
       const updated = setAgentCaps(id, Number(b.perOrderMinor), Number(b.dailyMinor));
@@ -377,6 +470,9 @@ export function buildApp() {
 
   app.post('/api/agents/:id/key', async (request, reply) => {
     const { id } = request.params as { id: string };
+    // An agent that does not exist yet is being created by this very call --
+    // there is nothing to own. One that exists must belong to the caller.
+    if (getAgent(id) && !owns(request as never, agentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
     const body = request.body as { label?: string; rotate?: boolean } | undefined;
     let issued;
     try {
@@ -394,7 +490,18 @@ export function buildApp() {
   });
 
   // Manual sweep, for the console button and for a demo with no tunnel.
-  app.post('/api/reconcile', async () => reconcile({ minAgeMs: 0 }));
+  //
+  // Rate-limited because on the open sandbox this is the one button a visitor
+  // can press that costs someone ELSE money: each sweep polls Razorpay once per
+  // pending order, so a loop here is an amplifier pointed at the gateway.
+  app.post('/api/reconcile', async (request, reply) => {
+    const limited = rateLimit(`reconcile:${ws(request as never) ?? request.ip ?? 'unknown'}`, 6, 60_000);
+    if (!limited.ok) {
+      return reply.code(429).header('retry-after', Math.ceil(limited.retryAfterMs / 1000))
+        .send({ error: 'rate_limited', message: 'Reconciling too often. Try again shortly.' });
+    }
+    return reconcile({ minAgeMs: 0 });
+  });
 
   app.get('/api/system', async () => ({
     demo: config.isDemo,
@@ -414,9 +521,12 @@ export function buildApp() {
     if (b.engage) engageKillSwitch(b.reason ?? 'stopped from the console', config.isDemo ? config.demoKillSwitchMinutes * 60_000 : 0);
     else releaseKillSwitch();
     record({
-      actor: 'human:console',
+      // Attributed to a workspace: on the open sandbox the stop button is
+      // global, so the ledger must say WHICH visitor pressed it.
+      actor: `human:console:${ws(request as never) ?? 'anonymous'}`,
       action: b.engage ? 'kill_switch.engaged' : 'kill_switch.released',
-      subjectId: null, outcome: 'ok', detail: { reason: b.reason ?? null },
+      subjectId: null, outcome: 'ok',
+      detail: { reason: b.reason ?? null, autoReleasesAt: KILL_SWITCH.releasesAt || null },
     });
     return { engaged: KILL_SWITCH.engaged, reason: KILL_SWITCH.reason };
   });

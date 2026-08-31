@@ -254,6 +254,68 @@ does more for perceived quality than its design does.**
 
 ---
 
+## 10. Adding multi-tenancy opened a hole bigger than the one it closed
+
+The sandbox was open by design, and that felt wrong once it was real: any
+visitor could see any other visitor's shops and orders. So workspaces went in —
+a silent cookie per visitor, a `workspace_id` on every table, and scoped list
+queries.
+
+An hour later, running a final sweep before committing, we counted how many
+`/api` routes actually applied the scope.
+
+**Seven out of twenty-one.**
+
+The list endpoints were all fine, because scoping a list is the change you
+naturally make: you are already writing the query, so you add the column. What
+we had not touched was every route that takes an **ID** — and those are the ones
+that matter, because an ID-addressed route has no list to filter. The ID *is*
+the query.
+
+The worst of them:
+
+```
+POST /api/approvals/:id/approve
+```
+
+No workspace check. Any visitor could approve any other visitor's spending by
+supplying its identifier. The entire premise of this project is that a human
+approves before an agent spends; we had just built a way to be that human for
+a stranger.
+
+Two things about how this happened are worth stating plainly:
+
+- **We introduced it ourselves, in the change meant to improve safety.** Adding
+  isolation to a system that had none creates a new invariant, and every
+  existing route silently fails to hold it. The change is not "add a column";
+  it is "audit every caller".
+- **All 109 tests still passed.** They were written when there was one shared
+  tenant, so not one of them had two visitors in it. A test suite cannot fail on
+  a distinction it has never expressed.
+
+The fix is an `owns()` check on all seven ID-addressed routes, returning **404
+rather than 403** so the endpoint does not confirm that an unreachable ID
+exists — and, deliberately, *not* relaxed in demo mode, since the open sandbox
+is exactly where strangers share one instance. Ten tenancy tests now put two
+cookie jars against one server and assert that Mallory cannot approve, reject,
+revoke, read, re-cap or re-key anything of Alice's.
+
+Two smaller things fell out of the same sweep. Scoping had quietly broken
+discovery — a shopper could no longer see any shop, which is the whole product —
+so the shop index is now explicitly public (`?scope=directory`), matching the
+MCP endpoint that was already open to the world. And `SECURITY.md` contained a
+sentence that had become false: *"the console is token-authenticated rather than
+cookie-authenticated, so a cross-site request cannot borrow ambient
+credentials."* Cookies had been introduced two hours earlier. The defence is now
+`SameSite=Lax` plus POST-only mutations, and the document says so.
+
+**The lesson:** when you add an isolation boundary to a system that did not have
+one, the work is not writing the boundary. It is enumerating every route and
+proving each one is on the right side of it. We found this by counting, not by
+testing — `grep -c` on the route list, against the number of routes.
+
+---
+
 ## What we would tell someone starting this
 
 1. **Test the seam you do not control, against the real thing, early.** Our worst
@@ -266,3 +328,6 @@ does more for perceived quality than its design does.**
 4. **Prefer deleting a dependency to patching it** when you barely needed it.
 5. **Look at the interface.** Half the defects in this document are invisible to
    a test suite and obvious in a screenshot.
+6. **Count, do not trust.** The most serious bug here was found by counting how
+   many routes applied a rule and comparing it to how many routes exist. A green
+   suite tells you the cases you thought of still pass.

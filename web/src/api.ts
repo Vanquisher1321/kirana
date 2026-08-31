@@ -33,7 +33,8 @@ export type Role = 'merchant' | 'shopper' | 'platform';
 export interface Session {
   workspaceId: string;
   role: Role | null;
-  canSwitchRole: boolean;
+  fullAccess: boolean;
+  canEnableFullAccess: boolean;
 }
 
 export interface Verification { ok: boolean; checked: number; brokenAtSeq?: number; reason?: string; }
@@ -83,10 +84,11 @@ export type Scope = 'mine' | 'platform';
 const q = (scope: Scope) => (scope === 'platform' ? '?scope=platform' : '');
 
 export const api = {
-  merchants: (scope: Scope = 'mine') => req<Merchant[]>(`/api/merchants${q(scope)}`),
+  merchants: (scope: Scope | 'directory' = 'mine') =>
+    req<Merchant[]>(`/api/merchants${scope === 'directory' ? '?scope=directory' : q(scope as Scope)}`),
   ingest: (url: string) => req<{ merchant: Merchant; productCount: number; variantCount: number; adapter: string; usedLlm: boolean; warnings: string[]; durationMs: number; mcpUrl: string }>(
     '/api/ingest', { method: 'POST', body: JSON.stringify({ url }) }),
-  approvals: () => req<Approval[]>('/api/approvals'),
+  approvals: (scope: Scope = 'mine') => req<Approval[]>(`/api/approvals${q(scope)}`),
   approve: (id: string) => req<Approval>(`/api/approvals/${id}/approve`, { method: 'POST', body: JSON.stringify({ by: 'om' }) }),
   reject: (id: string) => req<Approval>(`/api/approvals/${id}/reject`, { method: 'POST', body: JSON.stringify({ by: 'om' }) }),
   audit: (limit = 60, scope: Scope = 'mine') => req<AuditRow[]>(`/api/audit?limit=${limit}${scope === 'platform' ? '&scope=platform' : ''}`),
@@ -96,6 +98,7 @@ export const api = {
   system: () => req<SystemState>('/api/system'),
   session: () => req<Session>('/api/session'),
   chooseRole: (role: Role) => req<{ role: Role }>('/api/session/role', { method: 'POST', body: JSON.stringify({ role }) }),
+  setFullAccess: (enabled: boolean) => req<Session>('/api/session/full-access', { method: 'POST', body: JSON.stringify({ enabled }) }),
   issueKey: (agentId: string, label?: string) =>
     req<{ apiKey: string; agent: Agent; note: string }>(`/api/agents/${agentId}/key`, {
       method: 'POST', body: JSON.stringify({ label }),

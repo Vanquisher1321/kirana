@@ -211,6 +211,14 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutOutcome> {
   }
 }
 
+/** Which tenant an order belongs to, via the merchant that owns it. */
+export function orderWorkspace(orderId: string): string | null {
+  const r = db.prepare(
+    'SELECT m.workspace_id AS ws FROM orders o JOIN merchants m ON m.id = o.merchant_id WHERE o.id = ?',
+  ).get(orderId) as { ws?: string | null } | undefined;
+  return (r?.ws as string | null) ?? null;
+}
+
 export function getOrder(orderId: string): Record<string, unknown> | null {
   return (db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId) as Record<string, unknown>) ?? null;
 }

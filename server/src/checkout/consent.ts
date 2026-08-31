@@ -108,9 +108,35 @@ export function rejectConsent(consentId: string, by: string): Consent {
   return getConsent(consentId)!;
 }
 
-export function listPendingConsents(): Consent[] {
-  const rows = db.prepare("SELECT * FROM consents WHERE status='pending' ORDER BY expires_at ASC").all() as Record<string, unknown>[];
-  return rows.map(rowToConsent);
+/**
+ * Pending approvals, scoped to a tenant.
+ *
+ * The workspace is derived by joining through the quote to the merchant rather
+ * than denormalised onto the consent row, so it cannot drift out of sync with
+ * the shop the basket actually belongs to.
+ */
+export function listPendingConsents(workspaceId?: string | null): Consent[] {
+  const rows = workspaceId === undefined
+    ? db.prepare("SELECT * FROM consents WHERE status='pending' ORDER BY expires_at ASC").all()
+    : db.prepare(
+        `SELECT c.* FROM consents c
+         JOIN quotes q ON q.id = c.quote_id
+         JOIN merchants m ON m.id = q.merchant_id
+         WHERE c.status='pending' AND m.workspace_id IS ?
+         ORDER BY c.expires_at ASC`,
+      ).all(workspaceId);
+  return (rows as Record<string, unknown>[]).map(rowToConsent);
+}
+
+/** Which tenant an approval belongs to. Null when it cannot be resolved. */
+export function consentWorkspace(consentId: string): string | null {
+  const r = db.prepare(
+    `SELECT m.workspace_id AS ws FROM consents c
+     JOIN quotes q ON q.id = c.quote_id
+     JOIN merchants m ON m.id = q.merchant_id
+     WHERE c.id = ?`,
+  ).get(consentId) as { ws?: string | null } | undefined;
+  return (r?.ws as string | null) ?? null;
 }
 
 export function grantConsent(input: {

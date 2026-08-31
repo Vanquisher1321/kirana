@@ -62,8 +62,11 @@ export default function App() {
       // The Razorpay persona reads across every workspace; the merchant and
       // shopper views are confined to this visitor's own.
       const scope = personaRef.current === 'platform' ? 'platform' : 'mine';
+      // A shopper browses the whole network of shops -- that is the point of a
+      // directory. A merchant sees only the shops they connected.
+      const shops = personaRef.current === 'shopper' ? 'directory' : scope;
       const [merchants, approvals, audit, orders, agents, system, seal] = await Promise.all([
-        api.merchants(scope), api.approvals(), api.audit(60, scope), api.orders(scope), api.agents(scope), api.system(), api.verify(),
+        api.merchants(shops), api.approvals(scope), api.audit(60, scope), api.orders(scope), api.agents(scope), api.system(), api.verify(),
       ]);
       setData({ loaded: true, merchants, approvals, audit, orders, agents, system, seal });
       setErr(''); setLocked(false);
@@ -136,9 +139,9 @@ export default function App() {
           <div className="brandsub">Make any merchant AI-buyable</div>
         </div>
 
-        {session?.canSwitchRole ? (
-          <div className="personas" role="tablist" title="Demo only — on a real account your role is fixed">
-            <span className="demoswitch">Viewing as</span>
+        {session?.fullAccess ? (
+          <div className="personas" role="tablist" title="Reviewer mode — a real account only ever sees its own console">
+            <span className="demoswitch">Reviewing as</span>
             {(['merchant', 'shopper', 'platform'] as Persona[]).map((p) => (
               <button key={p} role="tab" className="persona" aria-selected={persona === p}
                 onClick={() => { void api.chooseRole(p).catch(() => {}); go(p); }}>
@@ -150,6 +153,19 @@ export default function App() {
           <span className="rolechip">
             {persona === 'platform' ? 'Razorpay · platform' : persona === 'merchant' ? 'Merchant' : 'Shopper'}
           </span>
+        )}
+
+        {session?.canEnableFullAccess && !session.fullAccess && (
+          <button className="reviewbtn" title="See all three consoles at once"
+            onClick={() => { void api.setFullAccess(true).then(setSession).then(() => refresh()); }}>
+            Reviewing this? See all three
+          </button>
+        )}
+        {session?.fullAccess && (
+          <button className="reviewbtn off" title="Go back to a single console, as a real account would see it"
+            onClick={() => { void api.setFullAccess(false).then(setSession).then(() => refresh()); }}>
+            Exit reviewer mode
+          </button>
         )}
 
         <div style={{ flex: 1 }} />

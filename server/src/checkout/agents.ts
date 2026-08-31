@@ -39,6 +39,12 @@ function rowToAgent(r: Record<string, unknown>): Agent {
   };
 }
 
+/** Which tenant an agent was first seen in. */
+export function agentWorkspace(agentId: string): string | null {
+  const r = db.prepare('SELECT workspace_id AS ws FROM agents WHERE id = ?').get(agentId) as { ws?: string | null } | undefined;
+  return (r?.ws as string | null) ?? null;
+}
+
 export function getAgent(agentId: string): Agent | null {
   const r = db.prepare('SELECT * FROM agents WHERE id = ?').get(agentId) as Record<string, unknown> | undefined;
   return r ? rowToAgent(r) : null;
