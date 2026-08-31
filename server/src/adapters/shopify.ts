@@ -92,14 +92,23 @@ export const shopifyAdapter: StorefrontAdapter = {
       warnings.push('Could not read /meta.json; assuming INR. Verify before going live.');
     }
 
-    let shopName = new URL(origin).hostname.replace(/^www\./, '');
+    // Fall back to a readable form of the domain, not the domain itself:
+    // Gymshark's homepage gave us nothing usable and the shop was listed to
+    // buyers as "gymshark.com".
+    let shopName = titleFromHost(new URL(origin).hostname);
     try {
       const shopRes = await fetchImpl(`${origin}/`, { headers: { accept: 'text/html' } });
       if (shopRes.ok) {
         const html = await shopRes.text();
         const m = html.match(/<meta\s+property=["']og:site_name["']\s+content=["']([^"']+)["']/i)
           ?? html.match(/<title[^>]*>([^<]+)<\/title>/i);
-        if (m?.[1]) shopName = m[1].split(/[|–-]/)[0]!.trim() || shopName;
+        // Decode entities: a shop called "Dot &amp; Key" was handed to buying
+        // agents, and shown in the console, exactly like that.
+        // Trim the tagline: "Dot & Key - Skincare" is a title, "Dot & Key" is
+        // a shop. Split on separators that are actually separators -- an
+        // EM-dash counts (decoding produces them), and a hyphen only when it
+        // is spaced, so a hyphenated brand name survives intact.
+        if (m?.[1]) shopName = decodeEntities(m[1]).split(/\s*[|\u2013\u2014\u00b7]\s*|\s+-\s+/)[0]!.trim() || shopName;
       }
     } catch { /* name is cosmetic; never fail ingestion over it */ }
 
@@ -197,3 +206,38 @@ export const shopifyAdapter: StorefrontAdapter = {
     };
   },
 };
+
+/**
+ * A shop's own HTML is the source of its name, and HTML is entity-encoded.
+ * Without this, "Dot &amp; Key" reaches the console and every buying agent
+ * verbatim. Only the five XML entities plus numeric refs -- this is a label,
+ * not a document, and a full HTML parser here would be a dependency and an
+ * attack surface for a cosmetic field.
+ */
+function decodeEntities(text: string): string {
+  return text
+    .replace(/&#(\d+);/g, (_, d: string) => safeChar(Number(d)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h: string) => safeChar(parseInt(h, 16)))
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&');   // last, so &amp;lt; does not become <
+}
+
+function safeChar(code: number): string {
+  // No control characters from a remote shop's markup into our own strings.
+  if (!Number.isFinite(code) || code < 32 || (code >= 127 && code < 160)) return '';
+  try { return String.fromCodePoint(code); } catch { return ''; }
+}
+
+/** "gymshark.com" -> "Gymshark". Better than the bare domain when a shop's own page tells us nothing. */
+function titleFromHost(hostname: string): string {
+  const base = hostname.replace(/^www\./, '').split('.')[0] ?? hostname;
+  return base
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((w) => w[0]!.toUpperCase() + w.slice(1))
+    .join(' ') || hostname;
+}

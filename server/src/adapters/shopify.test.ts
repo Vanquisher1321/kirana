@@ -111,3 +111,32 @@ test('degrades gracefully when a page errors mid-pagination', async () => {
   const r = await shopifyAdapter.ingest('https://shop.test', flaky, opts);
   assert.ok(r.products.length > 0);
 });
+
+test('a shop name survives HTML entities and a silent homepage', async () => {
+  // Both seen on real storefronts during a compatibility sweep: Dot & Key was
+  // listed to buying agents as "Dot &amp; Key", and Gymshark's homepage gave
+  // us nothing usable so the shop was called "gymshark.com".
+  const entityFetch = async (url: string | URL) => {
+    const u = String(url);
+    if (u.includes('/meta.json')) return new Response('{"currency":"INR"}', { headers: { 'content-type': 'application/json' } });
+    if (u.includes('/products.json')) {
+      const page = Number(new URL(u).searchParams.get('page') ?? '1');
+      return new Response(page > 1 ? '{"products":[]}' : FIXTURE, { headers: { 'content-type': 'application/json' } });
+    }
+    return new Response('<html><head><title>Dot &amp; Key &#8212; Skincare</title></head></html>', { headers: { 'content-type': 'text/html' } });
+  };
+  const decoded = await shopifyAdapter.ingest('https://dotandkey.test', entityFetch as never, { maxProducts: 50 });
+  assert.equal(decoded.merchant.name, 'Dot & Key', 'entities are decoded before a buyer ever sees the name');
+
+  const silentFetch = async (url: string | URL) => {
+    const u = String(url);
+    if (u.includes('/meta.json')) return new Response('{"currency":"INR"}', { headers: { 'content-type': 'application/json' } });
+    if (u.includes('/products.json')) {
+      const page = Number(new URL(u).searchParams.get('page') ?? '1');
+      return new Response(page > 1 ? '{"products":[]}' : FIXTURE, { headers: { 'content-type': 'application/json' } });
+    }
+    return new Response('<html><head></head></html>', { headers: { 'content-type': 'text/html' } });
+  };
+  const fallback = await shopifyAdapter.ingest('https://gymshark.test', silentFetch as never, { maxProducts: 50 });
+  assert.equal(fallback.merchant.name, 'Gymshark', 'the domain becomes a name, not a URL');
+});
