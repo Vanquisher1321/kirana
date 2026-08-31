@@ -276,6 +276,26 @@ export function buildApp(): FastifyInstance {
     return ownerWorkspace !== null && ownerWorkspace === ws(request);
   };
 
+  /**
+   * Who approved this, for the audit trail.
+   *
+   * The caller used to be able to name themselves, and both the console and the
+   * server defaulted that name to a hardcoded 'om' -- so on a public sandbox
+   * every stranger's approval was recorded as having been granted by the person
+   * who built it, and any caller could have written any name they liked into
+   * the ledger. The audit trail is the centrepiece of this project's argument;
+   * an attributable-to-anyone field is not evidence.
+   *
+   * Attribution comes from the session instead: the operator when the deploy
+   * secret was presented, otherwise the caller's own one-way workspace
+   * reference.
+   */
+  const approver = (request: { workspaceId?: string; operator?: boolean }): string => {
+    if (request.operator) return 'human:operator';
+    const w = ws(request);
+    return w ? `human:${workspaceRef(w)}` : 'human:anonymous';
+  };
+
   // -------------------------------------------------------------------------
   // Session. Who is this visitor, and which dashboard is theirs?
   // -------------------------------------------------------------------------
@@ -468,8 +488,7 @@ export function buildApp(): FastifyInstance {
   app.post('/api/approvals/:id/approve', async (request, reply) => {
     const { id } = request.params as { id: string };
     if (!owns(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
-    const by = (request.body as { by?: string } | undefined)?.by ?? 'om';
-    try { return approveConsent(id, by); }
+    try { return approveConsent(id, approver(request as never)); }
     catch (err) {
       if (err instanceof ConsentError) return reply.code(409).send({ error: err.code, message: err.message });
       throw err;
@@ -479,13 +498,13 @@ export function buildApp(): FastifyInstance {
   app.post('/api/approvals/:id/reject', async (request, reply) => {
     const { id } = request.params as { id: string };
     if (!owns(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
-    return rejectConsent(id, (request.body as { by?: string } | undefined)?.by ?? 'om');
+    return rejectConsent(id, approver(request as never));
   });
 
   app.post('/api/approvals/:id/revoke', async (request, reply) => {
     const { id } = request.params as { id: string };
     if (!owns(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
-    return revokeConsent(id, (request.body as { by?: string } | undefined)?.by ?? 'om');
+    return revokeConsent(id, approver(request as never));
   });
 
   app.get('/api/approvals/:id', async (request, reply) => {

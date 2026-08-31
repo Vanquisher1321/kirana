@@ -89,8 +89,10 @@ export const api = {
   ingest: (url: string) => req<{ merchant: Merchant; productCount: number; variantCount: number; adapter: string; usedLlm: boolean; warnings: string[]; durationMs: number; mcpUrl: string }>(
     '/api/ingest', { method: 'POST', body: JSON.stringify({ url }) }),
   approvals: (scope: Scope = 'mine') => req<Approval[]>(`/api/approvals${q(scope)}`),
-  approve: (id: string) => req<Approval>(`/api/approvals/${id}/approve`, { method: 'POST', body: JSON.stringify({ by: 'om' }) }),
-  reject: (id: string) => req<Approval>(`/api/approvals/${id}/reject`, { method: 'POST', body: JSON.stringify({ by: 'om' }) }),
+  // No `by` field: the server attributes an approval to the session that made
+  // it. A name the caller supplies is not evidence of who approved.
+  approve: (id: string) => req<Approval>(`/api/approvals/${id}/approve`, { method: 'POST', body: '{}' }),
+  reject: (id: string) => req<Approval>(`/api/approvals/${id}/reject`, { method: 'POST', body: '{}' }),
   audit: (limit = 60, scope: Scope = 'mine') => req<AuditRow[]>(`/api/audit?limit=${limit}${scope === 'platform' ? '&scope=platform' : ''}`),
   verify: () => req<Verification>('/api/audit/verify'),
   orders: (scope: Scope = 'mine') => req<Order[]>(`/api/orders${q(scope)}`),

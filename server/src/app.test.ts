@@ -134,12 +134,17 @@ test('the console can approve a pending request, and only a human can', async ()
   assert.ok(approvals.length >= 1);
   const target = approvals[0]!;
   assert.match(target.capFormatted, /^₹/);
+  // Note the caller does NOT say who approved. It used to, and the server
+  // trusted it -- so anyone could write any name into the audit trail, and the
+  // default was the maintainer's, meaning every stranger's approval on the
+  // public sandbox was recorded as his. Attribution comes from the session.
   const res = await authFetch(`${base}/api/approvals/${target.id}/approve`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ by: 'om' }),
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ by: 'whoever-i-say' }),
   });
   const granted = await res.json() as { status: string; grantedBy: string };
   assert.equal(granted.status, 'granted');
-  assert.equal(granted.grantedBy, 'om');
+  assert.equal(granted.grantedBy, 'human:operator', 'the deploy secret was presented, so this is the operator');
+  assert.ok(!granted.grantedBy.includes('whoever-i-say'), 'a caller-supplied name is never trusted');
 });
 
 test('the kill switch is reachable from the console and reported by the API', async () => {
