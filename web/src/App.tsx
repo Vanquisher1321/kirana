@@ -3,6 +3,7 @@ import {
   api, getToken, setToken, clearToken, Unauthorized,
   type Agent, type Approval, type AuditRow, type Merchant, type Order, type Session, type SystemState, type Verification,
 } from './api.ts';
+import { timeAgo } from './plain.ts';
 import Merchant_ from './personas/Merchant.tsx';
 import Shopper from './personas/Shopper.tsx';
 import Platform from './personas/Platform.tsx';
@@ -44,23 +45,20 @@ const NAV: Record<Persona, Array<[string, string] | ['div', '']>> = {
   ],
 };
 
-/** Fast enough that an approval appears while you watch; slow enough that a
- *  tab left open overnight does not spend a month of free-tier allowance. */
-const POLL_MS = 8000;
-
 const FIRST: Record<Persona, string> = { merchant: 'overview', shopper: 'home', platform: 'overview' };
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [persona, setPersona] = useState<Persona>('merchant');
   const personaRef = useRef<Persona>('merchant');
-  const lastSealAt = useRef(0);
   const [page, setPage] = useState('overview');
   const [data, setData] = useState<Data>({ loaded: false, merchants: [], approvals: [], audit: [], orders: [], agents: [], system: null, seal: null });
   const [locked, setLocked] = useState(false);
   const [needToken, setNeedToken] = useState(false);
   const [err, setErr] = useState('');
   const [shopId, setShopId] = useState('');
+  const [lastRead, setLastRead] = useState<number | null>(null);
+  const [reloading, setReloading] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -71,20 +69,18 @@ export default function App() {
       // directory. A merchant sees only the shops they connected.
       const shops = personaRef.current === 'shopper' ? 'directory' : scope;
       // audit/verify re-walks and re-hashes the ENTIRE chain server-side, so
-      // its cost grows with every row ever written. It was on the same tick as
-      // everything else, which meant the one O(n) endpoint ran twenty times a
-      // minute forever. It changes meaning only when the chain does, so it
-      // rides along once a minute instead.
-      const wantSeal = Date.now() - lastSealAt.current > 60_000;
+      // it costs more with every row ever written. Once per deliberate read is
+      // exactly right; it was running twenty times a minute.
+      const wantSeal = true;
       const [merchants, approvals, audit, orders, agents, system, seal] = await Promise.all([
         api.merchants(shops), api.approvals(scope), api.audit(60, scope), api.orders(scope), api.agents(scope), api.system(),
         wantSeal ? api.verify() : Promise.resolve(null),
       ]);
-      if (wantSeal) lastSealAt.current = Date.now();
       setData((prev) => ({
         loaded: true, merchants, approvals, audit, orders, agents, system,
         seal: seal ?? prev.seal,
       }));
+      setLastRead(Date.now());
       setErr(''); setLocked(false);
     } catch (e) {
       if (e instanceof Unauthorized) setLocked(true);
@@ -103,31 +99,22 @@ export default function App() {
   }, []);
 
   /**
-   * Poll only while somebody is looking.
+   * No polling. At all.
    *
-   * Seven endpoints every three seconds is ~140 requests a minute, forever,
-   * from any tab left open -- including one nobody is looking at. On Render's
-   * free tier that spends two allowances at once: the 5 GB of monthly
-   * bandwidth, and the 750 instance-hours, because a polling tab never lets
-   * the service go idle. Exhausting either suspends the service until the
-   * month turns over, which would be a very bad way to lose the judging
-   * window. It also buries any real error in a wall of 200s.
+   * This used to fetch seven endpoints every three seconds from every open
+   * tab. On Render's free tier that spends the 5 GB bandwidth allowance and
+   * the 750 instance-hours at the same time, and a polling tab never lets the
+   * service go idle -- so the thing most likely to take this site down before
+   * it is judged was the site refreshing itself.
    *
-   * A hidden tab stops entirely and catches up the moment it is looked at.
+   * A one-minute cold start is a cost a reviewer understands and forgives. A
+   * suspended service is not. So data loads once, and reloads when the person
+   * does something or asks for it: every action already calls refresh(), and
+   * the header carries a manual one with the time of the last read.
    */
   useEffect(() => {
     if (!session?.role) return;
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
-    const start = () => { if (!timer) timer = setInterval(() => void refresh(), POLL_MS); };
-    const onVisibility = () => {
-      if (document.hidden) stop();
-      else { void refresh(); start(); }
-    };
     void refresh();
-    if (!document.hidden) start();
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => { stop(); document.removeEventListener('visibilitychange', onVisibility); };
   }, [refresh, session?.role]);
 
   function go(p: Persona) {
@@ -208,6 +195,17 @@ export default function App() {
         <div style={{ flex: 1 }} />
 
         <div className="row" style={{ gap: 8 }}>
+          {/* Nothing refreshes itself, so the page has to say how old it is and
+              give you a way to ask again. A screen that quietly shows stale
+              numbers is worse than one that admits its age. */}
+          <button
+            className="reviewbtn"
+            title="Nothing polls in the background — this reads the server once"
+            disabled={reloading}
+            onClick={() => { setReloading(true); void refresh().finally(() => setReloading(false)); }}
+          >
+            {reloading ? 'Reading…' : lastRead ? `Updated ${timeAgo(new Date(lastRead).toISOString())}` : 'Refresh'}
+          </button>
           <span className="live">
             <i className={`livedot ${paused ? 'bad' : ''}`} />
             {paused ? 'Spending paused' : 'Live'}
