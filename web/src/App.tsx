@@ -44,12 +44,17 @@ const NAV: Record<Persona, Array<[string, string] | ['div', '']>> = {
   ],
 };
 
+/** Fast enough that an approval appears while you watch; slow enough that a
+ *  tab left open overnight does not spend a month of free-tier allowance. */
+const POLL_MS = 8000;
+
 const FIRST: Record<Persona, string> = { merchant: 'overview', shopper: 'home', platform: 'overview' };
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [persona, setPersona] = useState<Persona>('merchant');
   const personaRef = useRef<Persona>('merchant');
+  const lastSealAt = useRef(0);
   const [page, setPage] = useState('overview');
   const [data, setData] = useState<Data>({ loaded: false, merchants: [], approvals: [], audit: [], orders: [], agents: [], system: null, seal: null });
   const [locked, setLocked] = useState(false);
@@ -65,10 +70,21 @@ export default function App() {
       // A shopper browses the whole network of shops -- that is the point of a
       // directory. A merchant sees only the shops they connected.
       const shops = personaRef.current === 'shopper' ? 'directory' : scope;
+      // audit/verify re-walks and re-hashes the ENTIRE chain server-side, so
+      // its cost grows with every row ever written. It was on the same tick as
+      // everything else, which meant the one O(n) endpoint ran twenty times a
+      // minute forever. It changes meaning only when the chain does, so it
+      // rides along once a minute instead.
+      const wantSeal = Date.now() - lastSealAt.current > 60_000;
       const [merchants, approvals, audit, orders, agents, system, seal] = await Promise.all([
-        api.merchants(shops), api.approvals(scope), api.audit(60, scope), api.orders(scope), api.agents(scope), api.system(), api.verify(),
+        api.merchants(shops), api.approvals(scope), api.audit(60, scope), api.orders(scope), api.agents(scope), api.system(),
+        wantSeal ? api.verify() : Promise.resolve(null),
       ]);
-      setData({ loaded: true, merchants, approvals, audit, orders, agents, system, seal });
+      if (wantSeal) lastSealAt.current = Date.now();
+      setData((prev) => ({
+        loaded: true, merchants, approvals, audit, orders, agents, system,
+        seal: seal ?? prev.seal,
+      }));
       setErr(''); setLocked(false);
     } catch (e) {
       if (e instanceof Unauthorized) setLocked(true);
@@ -86,11 +102,32 @@ export default function App() {
     })();
   }, []);
 
+  /**
+   * Poll only while somebody is looking.
+   *
+   * Seven endpoints every three seconds is ~140 requests a minute, forever,
+   * from any tab left open -- including one nobody is looking at. On Render's
+   * free tier that spends two allowances at once: the 5 GB of monthly
+   * bandwidth, and the 750 instance-hours, because a polling tab never lets
+   * the service go idle. Exhausting either suspends the service until the
+   * month turns over, which would be a very bad way to lose the judging
+   * window. It also buries any real error in a wall of 200s.
+   *
+   * A hidden tab stops entirely and catches up the moment it is looked at.
+   */
   useEffect(() => {
     if (!session?.role) return;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+    const start = () => { if (!timer) timer = setInterval(() => void refresh(), POLL_MS); };
+    const onVisibility = () => {
+      if (document.hidden) stop();
+      else { void refresh(); start(); }
+    };
     void refresh();
-    const t = setInterval(() => void refresh(), 3000);
-    return () => clearInterval(t);
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { stop(); document.removeEventListener('visibilitychange', onVisibility); };
   }, [refresh, session?.role]);
 
   function go(p: Persona) {

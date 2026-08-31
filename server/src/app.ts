@@ -30,6 +30,12 @@ export function buildApp(): FastifyInstance {
   // real peer, so nothing is trusted at all.
   const trustedProxyHops = config.publicOrigin ? (_address: string, hop: number) => hop === 0 : false;
     const serverOptions: FastifyServerOptions = {
+      // Two lines per request, for a console that polls itself, buries every
+      // real event under thousands of 200s -- and the deploy log is where you
+      // look when something is actually wrong, on camera, with minutes to
+      // spare. Routine console reads are silenced; anything that writes, any
+      // agent call, and every non-2xx still logs.
+      disableRequestLogging: true,
       logger: process.env.KIRANA_QUIET
         ? false
         : { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss', ignore: 'pid,hostname,reqId,responseTime' } } },
@@ -400,6 +406,19 @@ export function buildApp(): FastifyInstance {
     if (status < 500) return reply.code(status).send({ error: 'bad_request', message: (err as Error).message });
     request.log.error(err);
     return reply.code(500).send({ error: 'internal_error', message: 'Something went wrong. Nothing was charged.' });
+  });
+
+  /**
+   * Log what is worth reading: writes, agent traffic, and anything that failed.
+   * A GET that returned 2xx on the console's own polling loop is noise.
+   */
+  app.addHook('onResponse', async (request, reply) => {
+    const route = request.routeOptions?.url ?? request.url;
+    const dull = request.method === 'GET' && reply.statusCode < 400 && route.startsWith('/api/');
+    if (dull || route === '/health') return;
+    request.log.info(
+      `${request.method} ${route} -> ${reply.statusCode}`,
+    );
   });
 
   app.get('/health', async () => ({ ok: true, service: 'kirana', razorpay: config.razorpay.configured }));
