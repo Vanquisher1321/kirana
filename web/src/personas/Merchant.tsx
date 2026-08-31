@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { api, type Merchant, type Order } from '../api.ts';
+import { useEffect, useState } from 'react';
+import { api, type CatalogProduct, type Merchant, type Order } from '../api.ts';
 import { Card, Empty, Kpi, Load, PageHead, Pill, Skeleton, statusTone, statusWord } from '../ui.tsx';
 import { describe, timeAgo } from '../plain.ts';
 import type { PersonaProps } from '../App.tsx';
@@ -181,7 +181,88 @@ function Catalogue({ shop, picker }: { shop?: Merchant; picker?: React.ReactNode
           </div>
         )}
       </Card>
+
+      {shop && <CatalogList slug={shop.publicId || shop.slug} />}
     </>
+  );
+}
+
+/**
+ * The page is called "What AI buyers can see" and it used to show four
+ * counters. A number is a claim; the catalogue is the evidence — and the
+ * console never fetched a single product, so nobody could check the claim
+ * against anything. This is the same rows an agent gets from search_products.
+ */
+function CatalogList({ slug }: { slug: string }) {
+  const [q, setQ] = useState('');
+  const [rows, setRows] = useState<CatalogProduct[] | null>(null);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    let live = true;
+    setRows(null);
+    const t = setTimeout(() => {
+      api.products(slug, q)
+        .then((r) => { if (live) { setRows(r); setErr(''); } })
+        .catch((e: Error) => { if (live) { setErr(e.message); setRows([]); } });
+    }, q ? 250 : 0);     // debounce typing, but load immediately on mount
+    return () => { live = false; clearTimeout(t); };
+  }, [slug, q]);
+
+  return (
+    <Card
+      title="Everything an AI buyer can see"
+      sub="Exactly what the search_products tool returns — same prices, same stock, same options."
+    >
+      <div className="row" style={{ marginBottom: 12 }}>
+        <input
+          className="field"
+          type="text"
+          placeholder="Search the catalogue the way an assistant would…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+      </div>
+      {err && <div className="tiny" style={{ marginBottom: 8 }}>Could not read the catalogue: {err}</div>}
+      <Load loaded={rows !== null} items={rows ?? []} rows={5} empty={q ? `Nothing matches “${q}”.` : 'No products readable yet.'}>
+        {(items) => (
+          <table>
+            <thead>
+              <tr><th>Product</th><th>Options</th><th>From</th><th>In stock</th></tr>
+            </thead>
+            <tbody>
+              {items.map((p) => {
+                const prices = p.variants.map((v) => v.priceMinor);
+                const cheapest = p.variants[prices.indexOf(Math.min(...prices))];
+                const available = p.variants.filter((v) => v.available).length;
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{p.title}</div>
+                      {p.tags.length > 0 && (
+                        <div className="tiny dim" style={{ marginTop: 2 }}>{p.tags.slice(0, 4).join(' · ')}</div>
+                      )}
+                    </td>
+                    <td className="dim">{p.variants.length}</td>
+                    <td className="num" style={{ fontWeight: 600 }}>{cheapest?.priceFormatted ?? '—'}</td>
+                    <td>
+                      <Pill tone={available > 0 ? 'ok' : 'warn'}>
+                        {available > 0 ? `${available} of ${p.variants.length}` : 'out of stock'}
+                      </Pill>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </Load>
+      {rows && rows.length >= 100 && (
+        <div className="tiny dim" style={{ marginTop: 10 }}>
+          Showing the first 100. Search to narrow it — an agent does the same thing.
+        </div>
+      )}
+    </Card>
   );
 }
 

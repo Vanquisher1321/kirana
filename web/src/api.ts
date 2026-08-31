@@ -1,3 +1,19 @@
+// Shapes taken from the live response, not from memory: the stock flag is
+// `available`, and there is no `sku` on the wire. Guessing these would have
+// shipped a catalogue that reported every product out of stock.
+export interface CatalogVariant {
+  id: string; title: string; externalId: string;
+  priceMinor: number; priceFormatted: string; compareAtMinor?: number;
+  currency: string; available: boolean;
+  options?: Record<string, string>; weightGrams?: number;
+}
+export interface CatalogProduct {
+  id: string; title: string; description?: string;
+  vendor?: string; productType?: string;
+  tags: string[]; url: string; imageUrl?: string;
+  variants: CatalogVariant[];
+}
+
 export interface Merchant {
   id: string; slug: string; publicId: string; workspaceId: string | null;
   name: string; originUrl: string; platform: string;
@@ -84,6 +100,8 @@ export type Scope = 'mine' | 'platform';
 const q = (scope: Scope) => (scope === 'platform' ? '?scope=platform' : '');
 
 export const api = {
+  products: (slug: string, q = '') =>
+    req<CatalogProduct[]>(`/api/merchants/${encodeURIComponent(slug)}/products${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   merchants: (scope: Scope | 'directory' = 'mine') =>
     req<Merchant[]>(`/api/merchants${scope === 'directory' ? '?scope=directory' : q(scope as Scope)}`),
   ingest: (url: string) => req<{ merchant: Merchant; productCount: number; variantCount: number; adapter: string; usedLlm: boolean; warnings: string[]; durationMs: number; mcpUrl: string }>(

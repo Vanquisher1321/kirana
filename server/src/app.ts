@@ -463,7 +463,10 @@ export function buildApp(): FastifyInstance {
 
   app.get('/api/merchants/:slug/products', async (request, reply) => {
     const { slug } = request.params as { slug: string };
-    const m = getMerchant(slug, ws(request as never));
+    // Your own shop, or the instance's shared demo shop. A catalogue is public
+    // data the MCP endpoint already serves to any agent on earth, so hiding it
+    // from the console that is meant to display it helps nobody.
+    const m = getMerchant(slug, ws(request as never)) ?? getMerchant(slug, null);
     if (!m) return reply.code(404).send({ error: 'merchant not found' });
     const q = (request.query as { q?: string }).q;
     return searchCatalog(m.id, { query: q, limit: 100 }).map((p) => ({
