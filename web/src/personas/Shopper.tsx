@@ -3,10 +3,13 @@ import { api } from '../api.ts';
 import { Card, Empty, Load, PageHead, Pill, Skeleton, statusTone, statusWord } from '../ui.tsx';
 import { describe, timeAgo, countdown } from '../plain.ts';
 import type { PersonaProps } from '../App.tsx';
+import { ShopperStart } from '../onboarding.tsx';
 
 /** The person whose assistant is spending. One decision, made unmissable —
  *  everything else on this screen exists to make that decision informed. */
-export default function ShopperView({ data, page, refresh, onBlocked }: PersonaProps) {
+export default function ShopperView(props: PersonaProps) {
+  const { data, page, refresh, onBlocked } = props;
+  if (page === 'start') return <ShopperStart {...props} />;
   if (page === 'shops') return <Shops data={data} refresh={refresh} onBlocked={onBlocked} />;
   if (page === 'activity') return <Activity data={data} />;
   if (page === 'limits') return <Limits data={data} />;

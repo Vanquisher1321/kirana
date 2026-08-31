@@ -3,10 +3,13 @@ import { api, type CatalogProduct, type Merchant, type Order } from '../api.ts';
 import { Card, Empty, Kpi, Load, PageHead, Pill, Skeleton, statusTone, statusWord } from '../ui.tsx';
 import { describe, timeAgo } from '../plain.ts';
 import type { PersonaProps } from '../App.tsx';
+import { MerchantStart } from '../onboarding.tsx';
 
 /** The shop owner. Their questions, in order: am I reachable by AI buyers,
  *  what did they buy, and who exactly am I letting spend? */
-export default function MerchantView({ data, page, refresh, onBlocked, shopId, setShopId }: PersonaProps) {
+export default function MerchantView(props: PersonaProps) {
+  const { data, page, refresh, onBlocked, shopId, setShopId } = props;
+  if (page === 'start') return <MerchantStart {...props} />;
   const shop = data.merchants.find((m) => m.id === shopId) ?? data.merchants[0];
   const picker = data.merchants.length > 1 ? (
     <select className="shopsel" value={shop?.id ?? ''} onChange={(e) => setShopId(e.target.value)}>

@@ -33,11 +33,11 @@ export interface PersonaProps {
 
 const NAV: Record<Persona, Array<[string, string] | ['div', '']>> = {
   merchant: [
-    ['overview', 'Overview'], ['catalogue', 'AI Catalogue'], ['orders', 'Orders'],
+    ['start', 'Getting started'], ['overview', 'Overview'], ['catalogue', 'AI Catalogue'], ['orders', 'Orders'],
     ['assistants', 'AI Assistants'], ['div', ''], ['record', 'The Record'],
   ],
   shopper: [
-    ['home', 'Home'], ['shops', 'Shops'], ['activity', 'Activity'], ['limits', 'Limits'],
+    ['start', 'Getting started'], ['home', 'Home'], ['shops', 'Shops'], ['activity', 'Activity'], ['limits', 'Limits'],
   ],
   platform: [
     ['overview', 'Overview'], ['merchants', 'Merchants'], ['transactions', 'Transactions'],
@@ -45,7 +45,10 @@ const NAV: Record<Persona, Array<[string, string] | ['div', '']>> = {
   ],
 };
 
-const FIRST: Record<Persona, string> = { merchant: 'overview', shopper: 'home', platform: 'overview' };
+// A first-time visitor lands on the guide, not on an empty dashboard. Once
+// setup is done every step reads as complete, so it costs a returning user one
+// glance and saves a new one from having to guess.
+const FIRST: Record<Persona, string> = { merchant: 'start', shopper: 'start', platform: 'overview' };
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
