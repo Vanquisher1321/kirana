@@ -111,6 +111,11 @@ the server and opens your browser. First run takes a minute; after that, seconds
 To take payments, copy `server/.env.example` to `server/.env` and add Razorpay
 **test** keys. The server refuses to start on a live key — not a warning, a crash.
 
+If you are going to commit to this repo, run `npm run hooks:install` once. It
+installs a pre-commit hook that reads staged *content* and refuses anything that
+looks like a key, a session id or an archive — the cases `.gitignore` cannot see
+because it only knows filenames.
+
 | Command | Does |
 |---|---|
 | `npm start` | Everything above |
@@ -118,7 +123,8 @@ To take payments, copy `server/.env.example` to `server/.env` and add Razorpay
 | `npm run agent -- --url <mcp-url> --want "coffee" --budget 1500` | A buyer agent in your terminal, driving the real protocol |
 | `npm run probe` | Which real Indian storefronts are ingestable right now |
 | `npm run reset` | Wipe and reseed for a clean demo take, without restarting |
-| `npm test` | 101 tests |
+| `npm test` | 127 tests |
+| `npm run hooks:install` | Pre-commit secret scanning (do this once) |
 
 ### Try it as an AI agent
 

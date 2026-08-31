@@ -1,14 +1,108 @@
+# ---------------------------------------------------------------------------
+# What must never enter a commit.
+#
+# This file is written defensively rather than minimally. Two of the entries
+# below exist because something nearly went wrong, and they are marked as such:
+# an ignore rule is only worth as much as the filename you thought of in
+# advance, so the categories are deliberately wider than this project's own
+# habits. `scripts/hooks/pre-commit` is the second line of defence, for the
+# filenames nobody thought of.
+# ---------------------------------------------------------------------------
+
+# --- Dependencies and build output -----------------------------------------
 node_modules/
 dist/
+web/dist/
+*.tsbuildinfo
+coverage/
+.nyc_output/
 
-# Every .env variant, including backups and copies. A narrow `.env` rule let a
-# `.env.backup-before-rename` into a commit once; this is the fix.
+# --- Secrets ---------------------------------------------------------------
+# Every .env variant, including backups and copies. A narrow `.env` rule once
+# let a `.env.backup-before-rename` into a commit; `.env*` is the fix. The
+# second line catches the OTHER spelling -- prod.env, secrets.env -- which the
+# first one does not match, because `.env*` only anchors the leading dot.
 .env*
 !.env.example
-*.log
-# Databases and test artefacts never belong in the tree.
+*.env
+
+# Keys, certificates and credential stores of every shape. Nothing here should
+# ever exist in this repo; that is exactly why it is cheap to exclude.
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ecdsa*
+id_ed25519*
+*.gpg
+*.asc
+credentials.json
+service-account*.json
+
+# Tunnel and deployment credentials -- zrok, ngrok and cloudflared all write
+# tokens to disk, and this project has used all three.
+.zrok/
+.ngrok*
+*.tunnel.json
+cloudflared*.json
+
+# --- Archives --------------------------------------------------------------
+# THE NEAR-MISS. Building a source tarball at the repo root sweeps up
+# `server/.env` unless you remember to exclude it, and a secret inside a
+# .tgz is invisible to every text-based secret scan -- including the ones run
+# on this repo. Only a manual `rm` kept one out of a `git add -A`. Archives are
+# build artefacts or transfers; neither belongs in version control.
+*.tgz
+*.tar
+*.tar.gz
+*.zip
+*.7z
+*.rar
+*.gz
+
+# --- Databases -------------------------------------------------------------
+# KIRANA_DB is configurable, so the database does not always land in
+# server/data/ -- and SQLite's WAL and shared-memory sidecars are separate
+# files that carry the same rows.
 server/data/
-web/dist/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.dump
+*.sql
+
+# --- Logs and crash output -------------------------------------------------
+*.log
+logs/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+report.*.json
+
+# --- Generated demo artefacts ----------------------------------------------
 artifacts/*
 !artifacts/.gitkeep
+
+# --- Editors, tools and operating systems ----------------------------------
+# .vscode/ is deliberately NOT ignored: launch.json and tasks.json are how a
+# reviewer runs this project, and both were checked for secrets. The local
+# settings files that tools write per-machine are excluded.
+.vscode/*.local.json
+.idea/
+*.swp
+*.swo
+*~
+.claude/settings.local.json
 .DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/

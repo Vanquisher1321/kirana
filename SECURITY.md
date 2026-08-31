@@ -138,6 +138,35 @@ A space-joined encoding hashes `{actor: "a b", action: "c"}` identically to
 `{actor: "a", action: "b c"}`, so content could shift across a field boundary
 while the chain still verified.
 
+### Nothing secret reaches a commit
+
+Two controls, because the first one only works on filenames somebody predicted.
+
+**`.gitignore`** excludes the categories rather than this project's own habits:
+every `.env` spelling in both directions (`.env*` and `*.env`), keys and
+certificates of every extension, databases including SQLite's `-wal` and `-shm`
+sidecars, tunnel credentials for zrok/ngrok/cloudflared, and **archives**.
+
+That last one is not hypothetical. Building a source tarball at the repo root
+sweeps up `server/.env`, and a secret inside a `.tgz` is invisible to every
+text-based secret scan — including the ones run on this repo. Two such archives
+were created here during review, and only a manual delete kept them out of a
+`git add -A`.
+
+**`scripts/hooks/pre-commit`** covers the filenames nobody predicted. It reads
+what is actually *staged* — content, not names — and refuses the commit on a
+private-key block, a Razorpay key id, an agent key, a workspace session id,
+high-entropy hex of the signing-secret shape, an AWS key id, a credential
+assignment, an env-shaped path, an archive, or any binary blob. Placeholders
+and repeated-character test fixtures are excluded, so it does not fire on the
+honest tree. Install it with `npm run hooks:install`; `--no-verify` overrides
+it, deliberately, because a hook that cannot be overridden gets uninstalled the
+first time it is wrong.
+
+Verified by trying to commit the live `.env` four ways: as an archive, under an
+unpredicted name (`server/env.txt`), pasted into a `.ts` source file, and as
+`prod.env`. All four refused; the honest 78-file tree passes clean.
+
 ### Information leakage
 Unexpected errors are logged, not returned. Config reporting shows whether a
 secret exists, never its value. The server refuses to start with a live

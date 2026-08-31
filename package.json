@@ -16,6 +16,7 @@
     "agent": "npm --prefix server run agent --",
     "test": "npm --prefix server test",
     "build:deploy": "npm --prefix server install --omit=dev && npm --prefix web install && npm --prefix web run build",
-    "reset": "npm --prefix server run reset"
+    "reset": "npm --prefix server run reset",
+    "hooks:install": "node scripts/install-hooks.mjs"
   }
 }
