@@ -27,7 +27,29 @@ const fixtureFetch: FetchLike = async (url) => {
   });
 };
 
+/**
+ * A REAL storefront first, the fixture only if the network says no.
+ *
+ * Render's free tier keeps the database in /tmp and spins the instance down
+ * after 15 idle minutes, so a cold visitor always lands on whatever this
+ * function produced. For a long time that was the two-product test fixture,
+ * complete with its deliberately broken price -- a judge's first impression of
+ * a project about real commerce was a fake shop throwing parse warnings.
+ *
+ * Ingesting a live store takes about two seconds and reads only its public
+ * product feed. If it is slow, rate-limited or reachable-but-changed, the
+ * fixture is still there: the demo has a floor, it just no longer starts on it.
+ */
+const DEMO_STORE = process.env.KIRANA_DEMO_STORE || 'bluetokaicoffee.com';
+
 export async function seedDemoStore() {
+  try {
+    // Default transport: the SSRF guard stays on and the 15s fetch timeout
+    // applies. Passing our own fetchImpl would disable the guard, which is
+    // exactly the wrong trade for the one call that reads a real website.
+    const real = await ingestStorefront(DEMO_STORE);
+    if (real.productCount > 0) return real;
+  } catch { /* fall through to the offline fixture */ }
   return ingestStorefront('bluehill.example', { fetchImpl: fixtureFetch });
 }
 
