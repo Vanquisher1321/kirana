@@ -49,7 +49,7 @@ flowchart LR
 
 **Stack.** Node 22 + TypeScript run directly (no build step — Node strips types),
 Fastify, SQLite via `node:sqlite`, four dependencies, zero native modules.
-~4,000 lines of server source, 101 tests.
+~5,400 lines of server source, 127 tests.
 
 ---
 

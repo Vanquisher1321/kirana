@@ -289,7 +289,7 @@ Two things about how this happened are worth stating plainly:
   isolation to a system that had none creates a new invariant, and every
   existing route silently fails to hold it. The change is not "add a column";
   it is "audit every caller".
-- **All 109 tests still passed.** They were written when there was one shared
+- **All 109 tests then in the suite still passed.** They were written when there was one shared
   tenant, so not one of them had two visitors in it. A test suite cannot fail on
   a distinction it has never expressed.
 

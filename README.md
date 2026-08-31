@@ -159,7 +159,7 @@ One system, three people, on a persona switcher.
   `pino-pretty`. **Zero native modules**, so it installs and runs identically on
   Windows, macOS and Linux.
 - **SQLite via `node:sqlite`**, built into Node. No database server.
-- **~4,000 lines** of server source, and **101 tests**.
+- **~5,400 lines** of server source, and **127 tests**.
 
 Money is an integer number of paise everywhere. `parseFloat("499.10") * 100`
 returns `49909.999999999993`, and there is a test asserting we never do that.
