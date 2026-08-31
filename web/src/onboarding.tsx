@@ -115,8 +115,9 @@ export function MerchantStart({ data, refresh, onBlocked }: PersonaProps) {
               </div>
               {err && <div className="tiny" style={{ marginTop: 8 }}>{err}</div>}
               <div className="tiny dim" style={{ marginTop: 8 }}>
-                Works with Shopify and WooCommerce shops today. Not sure? Try it - we tell you
-                exactly what we could and could not read.
+                Works with any Shopify shop today - about a quarter of Indian D2C brands, and
+                no cooperation needed from them. Not sure what yours runs on? Try it: we tell
+                you exactly what we could and could not read.
               </div>
             </>
           )}
@@ -175,8 +176,8 @@ export function ShopperStart({ data, refresh, onBlocked }: PersonaProps) {
             </div>
           )}
           <div className="tiny dim" style={{ marginBottom: 8 }}>
-            Want a shop that is not listed? Add any Shopify or WooCommerce store and it becomes
-            buyable in about two seconds.
+            Want a shop that is not listed? Add any Shopify store and it becomes buyable in
+            about two seconds.
           </div>
           <div className="row">
             <input

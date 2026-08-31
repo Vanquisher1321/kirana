@@ -60,6 +60,13 @@ Structured feeds first, a language model last:
 | 3 | schema.org product data | exact | designed, not built |
 | 4 | Raw HTML read by a model | interpreted, **and flagged to buyers** | designed, not built |
 
+Tier 1 alone reaches further than it sounds. Seventeen real brands — Blue Tokai,
+Sleepy Owl, boAt, SUGAR, Nicobar, Chumbak, Allbirds, Gymshark and nine more —
+were made agent-purchasable straight from the live sandbox: **4,846 products and
+13,894 buying options**, no model involved, none of those shops asked or told.
+Twelve more were refused, explicitly and with a reason. The measured list, wins
+and failures both, is in [COMPATIBILITY.md](COMPATIBILITY.md).
+
 That ordering is the engineering opinion of this project. Reaching for a model
 first gives you a catalogue that is 95% right, which in a payments context is
 another way of saying wrong.

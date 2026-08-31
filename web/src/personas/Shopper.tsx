@@ -254,7 +254,7 @@ function Shops({ data, refresh, onBlocked }: Pick<PersonaProps, 'data' | 'refres
         sub="Give your assistant one of these links and it can browse and buy — within the limits you set."
       />
 
-      <Card title="Add a shop" sub="Any Shopify or WooCommerce store. We read its public catalogue; nothing is installed on their site.">
+      <Card title="Add a shop" sub="Any Shopify store. We read the catalogue it already publishes; nothing is installed on their site.">
         <div className="row">
           <input
             className="field" type="text" placeholder="bluetokaicoffee.com" value={url}
