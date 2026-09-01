@@ -53,12 +53,20 @@ Five stages. Every one of them is written to an audit trail.
 
 Structured feeds first, a language model last:
 
-| Tier | Source | Prices are | Built |
-|---|---|---|---|
-| 1 | Shopify `/products.json` | exact | **yes** |
-| 2 | WooCommerce Store API | exact | designed, not built |
-| 3 | schema.org product data | exact | designed, not built |
-| 4 | Raw HTML read by a model | interpreted, **and flagged to buyers** | designed, not built |
+| Tier | Source | Prices are | Merchant does | Built |
+|---|---|---|---|---|
+| 0 | **A feed the merchant hands us** | exact, authoritative | pastes one URL | designed, not built |
+| 1 | Shopify `/products.json` | exact | nothing | **yes** |
+| 2 | WooCommerce Store API | exact | nothing | designed, not built |
+| 3 | schema.org / JSON-LD product data | exact | nothing | designed, not built |
+| 4 | Raw HTML read by a model | interpreted, **and flagged to buyers** | nothing | designed, not built |
+
+Tier 0 sits above Shopify on purpose. Every other rung is Kirana working out what
+a shop sells; tier 0 is the shop telling us, from the product feed it already
+maintains for Google Shopping. It is more accurate than any adapter can be, it
+works on platforms no adapter will ever cover, and a merchant who pastes that URL
+has consented — which crawling cannot establish at all. See
+[Who Kirana is for](#who-kirana-is-for-and-who-it-deliberately-leaves-alone).
 
 Tier 1 alone reaches further than it sounds. **Thirty real brands** — Blue Tokai,
 Sleepy Owl, Subko, boAt, SUGAR, Snitch, Nicobar, Chumbak, Mokobara, Suta,
@@ -183,12 +191,108 @@ customer they had not paid.
 
 ---
 
+## Who Kirana is for, and who it deliberately leaves alone
+
+The most common question about this project is "what about Amazon?" — so here is
+the answer, because the scope is a design decision rather than a limitation we
+have not got around to.
+
+### Marketplaces are not the target, and should not be
+
+Amazon, Flipkart, Nykaa and Myntra are not blocked by anything technical. They
+are excluded because **reading a catalogue is the easy half; the right to take
+the payment is the hard half.**
+
+Kirana works by creating a Razorpay payment link. That is legitimate exactly
+when the shop being read is the party being paid. A marketplace never agreed to
+that, cannot fulfil an order raised outside its own checkout, and would be
+perfectly right to treat it as fraud. Scraping one would mean fighting anti-bot
+systems and terms of service in order to produce a payment link that nobody will
+honour — a very sophisticated way to take money for an order that does not
+exist.
+
+There is a business reason on top of the technical one. **Amazon does not need
+Razorpay, and Razorpay does not earn on Amazon.** Amazon has its own agentic
+commerce roadmap and the engineers to build it. The merchants who cannot build
+this themselves — and who are already Razorpay's customers — are the entire
+point. Building for Amazon would make this a scraping project. Building for the
+merchant base makes it infrastructure.
+
+If a marketplace ever *should* be reachable, the route is its own partner API
+under a commercial agreement, not extraction. That is a business development
+problem, not an engineering one.
+
+### Own-brand storefronts are the target, including the ones that fail today
+
+Wakefit, The Souled Store, Bewakoof, Forest Essentials, Kama Ayurveda, Ustraa
+and the rest of [COMPATIBILITY.md](COMPATIBILITY.md)'s failures are a completely
+different case from a marketplace. They **own their inventory and their
+checkout**, so a Razorpay link is exactly right for them. They fail today only
+because they are not on Shopify, and that is an adapter away.
+
+Three of the four routes to them need nothing from the merchant at all:
+
+| Route | Prices are | Needs the merchant to | Reaches |
+|---|---|---|---|
+| **Shopify `/products.json`** | exact | nothing | ~a quarter of Indian D2C — **built** |
+| **WooCommerce Store API** | exact | nothing | most WordPress shops |
+| **JSON-LD `Product` markup** | exact | nothing | almost any storefront with SEO |
+| **A feed the merchant hands us** | exact | one URL, once | anything at all |
+
+**JSON-LD is the big one.** Custom storefronts already embed schema.org `Product`
+data — name, price, currency, availability — on every product page, deliberately,
+so Google Shopping can read it. It is structured data published *for machines to
+consume*, it is exact, and it cuts straight across platforms: Magento, a bespoke
+React storefront, an in-house PHP monolith. A shop that ranks on Google is
+usually already publishing everything Kirana needs.
+
+### The fourth route: the merchant just tells us
+
+The three adapters above are Kirana meeting a storefront where it stands. The
+fourth turns the problem around, and it is the one that actually scales.
+
+A shop that sells online almost certainly already generates a **product feed** —
+a Google Merchant Center XML or TSV file, or a Meta catalogue — because that is
+how it advertises. It is a complete, authoritative, machine-readable list of
+everything it sells, with prices and stock, maintained by the merchant because
+their ad spend depends on it being right.
+
+So the highest tier of the ladder is not a cleverer scraper. It is a text box
+that says *"paste your product feed URL"*:
+
+- **It is exact and authoritative.** The merchant's own numbers, not our reading
+  of their HTML. No adapter can be more correct than this.
+- **It works on every platform**, including the in-house ones no adapter will
+  ever cover.
+- **It is consent.** A merchant who pastes a feed URL has said yes — which is the
+  thing crawling can never establish, and which a real Razorpay deployment would
+  want anyway.
+- **It is five minutes of their existing dev team's time**, because the file
+  already exists.
+
+That inverts the onboarding story for the shops adapters cannot reach: instead of
+"we could not read your site", the merchant gets "paste the feed you already give
+Google". In a real Razorpay deployment this becomes a field in merchant
+onboarding, and the crawler becomes the fallback rather than the front door.
+
+**Ranked by what they would actually unlock:** the merchant feed first, because
+it is the only route that is both universal and consented; JSON-LD second,
+because it needs nothing from anyone and covers most custom storefronts;
+WooCommerce third. A model reading raw HTML stays last, and anything it produces
+is flagged to buying agents as interpreted rather than read.
+
+---
+
 ## What it does not do
 
 Stated here rather than discovered by a reviewer.
 
-- **Shopify only.** The other three ingestion tiers are designed, not built. A
-  WooCommerce or hand-rolled store fails with "no adapter matched".
+- **Shopify only.** The other ingestion routes are designed, not built. A
+  WooCommerce or hand-rolled store fails with an explicit "no adapter matched"
+  rather than an empty catalogue. Thirty real shops work today; fourteen tested
+  do not, and both lists are in [COMPATIBILITY.md](COMPATIBILITY.md).
+- **Marketplaces are out of scope by design, not by accident.** See above: the
+  blocker is the right to take the payment, not the ability to read a catalogue.
 - **Test mode only.** No defence here has been exercised against real money.
 - **Ingestion reads without asking.** It only ever reads data a shop already
   publishes, and identifies itself honestly — but in a real deployment consent

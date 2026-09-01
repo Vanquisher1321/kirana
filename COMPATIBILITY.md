@@ -81,6 +81,21 @@ The refusal is explicit — *"No ingestion adapter could read X. Supported today
 shopify."* — rather than a silent empty catalogue. A shop that cannot be read is
 told so, immediately, with the reason.
 
+## Marketplaces are not on either list
+
+Amazon, Flipkart, Nykaa and Myntra were tested and refused, but they do not
+belong in the table above as "not supported yet", because they are not a target.
+Reading a catalogue is the easy half; **the right to take the payment is the hard
+half**, and a marketplace never granted it. A Razorpay link raised against an
+Amazon order is a link nobody will honour.
+
+The shops in the failure table are a different case entirely: Wakefit, The Souled
+Store, Bewakoof, Forest Essentials, Kama Ayurveda and Ustraa own their inventory
+and their checkout, so a Razorpay link is exactly right for them. They fail only
+because they are not on Shopify. That is an adapter away, and the README's
+[scope section](README.md#who-kirana-is-for-and-who-it-deliberately-leaves-alone)
+sets out the four routes to them.
+
 ## What would widen this
 
 Roughly **a quarter of Indian D2C brands run on Shopify**, which is why that
@@ -90,15 +105,21 @@ zero merchant effort.
 The ingestion ladder in `ARCHITECTURE.md` has three more rungs designed and not
 built, in the order they are worth building:
 
-1. **WooCommerce Store API** — the next largest group, and exact like Shopify.
-2. **JSON-LD `Product` markup** — most custom storefronts publish it for Google,
-   so it is already there on sites that have no API at all.
-3. **A model reading the HTML** — last resort, and the only rung that guesses.
+1. **A feed the merchant hands us** — the shop pastes the Google Merchant Center
+   or Meta catalogue URL it already maintains for its own ads. Exact,
+   authoritative, works on every platform including in-house ones, and it is
+   consent rather than crawling. Five minutes of a dev team's time, because the
+   file already exists.
+2. **JSON-LD `Product` markup** — most custom storefronts embed it for Google
+   Shopping, so it is already sitting on sites with no API at all. Needs nothing
+   from anyone and cuts across Magento, bespoke React and PHP monoliths alike.
+3. **WooCommerce Store API** — exact like Shopify, and the largest single group
+   after it.
+4. **A model reading the HTML** — last resort, and the only rung that guesses.
    Anything it produces is flagged to buying agents as interpreted rather than
    read, so an agent can treat those prices with suspicion.
 
-Rungs 1 and 2 are the difference between "a quarter of D2C" and "most of it".
-Neither needs the merchant to do anything either.
+The first two are the difference between "a quarter of D2C" and "most of it".
 
 ## Checking a shop yourself, in five seconds
 
