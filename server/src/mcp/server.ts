@@ -37,7 +37,14 @@ function ok(payload: unknown) {
  * length bound removes the room to build one.
  */
 function asPlainLabel(text: string, max = 80): string {
-  const flat = text.replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  // \s misses U+2028/U+2029, and many clients render LINE SEPARATOR as a hard
+  // break -- restoring exactly the framing this function exists to remove,
+  // inside the length budget. Strip every Unicode line/paragraph separator and
+  // every control character, then collapse.
+  const flat = text
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 

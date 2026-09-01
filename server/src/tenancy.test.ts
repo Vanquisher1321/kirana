@@ -65,6 +65,7 @@ class Visitor {
 let alice: Visitor;
 let mallory: Visitor;
 let aliceConsentId = '';
+let aliceQuoteId = '';
 let aliceOrderMerchant = '';
 
 before(async () => {
@@ -87,6 +88,7 @@ before(async () => {
   const quote = createQuote(merchant.id, [{ variantId: variant.id, quantity: 1 }], 'alice-agent');
   // A *pending* request -- the agent asked, no human has answered yet. That is
   // the record an attacker would most want to answer on someone else's behalf.
+  aliceQuoteId = quote.id;
   aliceConsentId = requestConsent({
     quoteId: quote.id, agentId: 'alice-agent', capMinor: 5_000_00, scope: merchant.id,
   }).id;
@@ -164,12 +166,28 @@ test('TENANCY: asking for the platform scope is not enough on its own', async ()
   assert.equal(rows.length, 0, 'the role decides, not the query string');
 });
 
-test('the platform persona is the one view that legitimately reads across', async () => {
+test('the platform persona reads across for shops and orders', async () => {
+  const rzp = new Visitor();
+  await rzp.role('platform');
+  const shops = await (await rzp.fetch('/api/merchants?scope=platform')).json() as unknown[];
+  assert.ok(Array.isArray(shops), 'a platform console that cannot see the platform is useless');
+  assert.ok(aliceOrderMerchant.length > 0);
+});
+
+test("SECURITY: but NOT for approvals, because a pending approval is a capability", async () => {
+  // This test used to assert the opposite, and that assertion was the
+  // vulnerability. A pending approval publishes its quoteId and consentId, and
+  // the open /mcp endpoint spends exactly that pair plus a self-asserted agent
+  // name. So a stranger picked the Razorpay persona with one unauthenticated
+  // POST, read every tenant's queue, waited for someone else's human to click
+  // approve, and spent it. Reading across for approvals now needs the operator
+  // token, exactly like acting on one does.
   const rzp = new Visitor();
   await rzp.role('platform');
   const list = await (await rzp.fetch('/api/approvals?scope=platform')).json() as Array<{ id: string }>;
-  assert.ok(list.some((c) => c.id === aliceConsentId), 'a platform console that cannot see the platform is useless');
-  assert.ok(aliceOrderMerchant.length > 0);
+  assert.equal(list.some((c) => c.id === aliceConsentId), false, "a self-selected role must not read another tenant's approvals");
+  const raw = JSON.stringify(list);
+  assert.equal(raw.includes(aliceQuoteId), false, 'and must not publish the quote id either');
 });
 
 test('ESCALATION: choosing the Razorpay persona does not grant the right to approve', async () => {
@@ -183,9 +201,10 @@ test('ESCALATION: choosing the Razorpay persona does not grant the right to appr
   const mallory2 = new Visitor();
   await mallory2.role('platform');
 
-  // The read view really does widen -- that part is intended.
+  // The read view does NOT widen for approvals: the ids in one are a
+  // capability the open MCP endpoint will spend.
   const seen = await (await mallory2.fetch('/api/approvals?scope=platform')).json() as Array<{ id: string }>;
-  assert.ok(seen.some((c) => c.id === aliceConsentId), 'the platform console can see the queue');
+  assert.equal(seen.some((c) => c.id === aliceConsentId), false, "a self-selected role sees no other tenant's approvals");
 
   // Acting on it does not.
   for (const verb of ['approve', 'reject', 'revoke']) {
@@ -272,4 +291,32 @@ test("SHARING THE DEMO SHOP DID NOT SHARE AGENTS", async () => {
   assert.equal(caps.status, 404, "caps on someone else's agent stay out of reach");
   const key = await mallory.fetch('/api/agents/demo-agent/key', { method: 'POST', body: JSON.stringify({ label: 'stolen' }) });
   assert.equal(key.status, 404, 'and an unowned agent is not a free agent');
+});
+
+test('SECURITY: the public shop directory does not publish anyone\u2019s session', async () => {
+  // A Merchant row carries workspaceId, and workspaceId IS the session cookie.
+  // `{ ...m }` in the directory route published every merchant's session to
+  // anyone with the URL: harvest an id, set it as kirana_ws, become them.
+  // Reproduced before the fix; this is the regression that keeps it fixed.
+  const aliceWs = ((await (await alice.fetch('/api/session')).json()) as { workspaceId: string }).workspaceId;
+
+  const stranger = new Visitor();
+  const directory = await (await stranger.fetch('/api/merchants?scope=directory')).text();
+  assert.equal(directory.includes(aliceWs), false, 'a shop listing must never carry its owner\u2019s session id');
+  assert.equal(directory.includes('workspaceId'), false, 'and not the field at all, under any value');
+
+  // The same row reached callers through /api/ingest, so check that shape too.
+  const ing = await stranger.fetch('/api/ingest', { method: 'POST', body: JSON.stringify({ url: 'stranger-shop.example' }) });
+  const body = await ing.text();
+  assert.equal(body.includes(aliceWs), false, 'nor may an ingest report');
+
+  // And the belt-and-braces hook: anything that tries anyway is redacted.
+  const everywhere = [
+    await (await stranger.fetch('/api/merchants')).text(),
+    await (await stranger.fetch('/api/orders')).text(),
+    await (await stranger.fetch('/api/agents')).text(),
+    await (await stranger.fetch('/api/approvals')).text(),
+    await (await stranger.fetch('/api/audit?limit=200')).text(),
+  ].join('');
+  assert.equal(everywhere.includes(aliceWs), false, 'no console route leaks another visitor\u2019s session');
 });

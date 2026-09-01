@@ -236,8 +236,12 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutOutcome> {
     // non-retryable error. A timeout or a 5xx is ambiguous -- the charge may
     // exist -- and there we keep them burned and make the human approve again.
     // Releasing on an ambiguous failure is how one approval becomes two links.
+    // A 429 is rejected at Razorpay's door before any work is done -- the
+    // client module says exactly that -- but `retryable` is true for it, so
+    // the old test excluded it and a rate-limit blip permanently destroyed a
+    // human approval that provably never created anything.
     const certainlyNotSent = err instanceof CircuitOpenError
-      || (err instanceof RazorpayError && err.retryable === false);
+      || (err instanceof RazorpayError && (err.retryable === false || err.status === 429));
     if (certainlyNotSent) {
       releaseConsent(input.consentId);
       releaseQuote(quote.id);
@@ -320,16 +324,35 @@ export function settleOrder(input: {
   // `awaiting_payment`, which makes `failed` terminal. Money captured, ledger
   // says the customer did not pay. A replayed failure body does the same on
   // demand.
-  if (String(row.status) === 'paid' && input.status === 'failed') {
+  // A failed attempt NEVER closes an open order.
+  //
+  // reconcile.ts states this invariant for itself -- "a failed attempt does
+  // not close the order: the customer can simply try again on the same link,
+  // which is exactly what a human does after an OTP or 3-D Secure failure" --
+  // and then the webhook path did the opposite. `failed` is terminal because
+  // the reconciler only sweeps `awaiting_payment`, so a customer who failed
+  // once, retried and succeeded ended with money captured and a ledger saying
+  // they never paid. The reconciler asserted the rule in a test; the webhook
+  // broke it untested.
+  if (input.status === 'failed' && (String(row.status) === 'paid' || String(row.status) === 'awaiting_payment')) {
+    const wasPaid = String(row.status) === 'paid';
+    db.prepare("UPDATE orders SET failure_reason = ?, updated_at = ? WHERE id = ?")
+      .run(`last attempt failed: ${input.failureReason ?? 'no reason given'}`, nowIso(), orderId);
     record({
-      actor: 'razorpay:webhook', action: 'settlement.late_failure_ignored', subjectId: orderId, outcome: 'ok',
+      actor: 'razorpay:webhook',
+      action: wasPaid ? 'settlement.late_failure_ignored' : 'payment.attempt_failed',
+      subjectId: orderId, outcome: 'ok',
       detail: {
         paymentId: input.paymentId,
-        note: 'A failed attempt arrived for an order that is already paid. Ignored; the capture stands.',
+        failureReason: input.failureReason ?? null,
+        note: wasPaid
+          ? 'A failed attempt arrived for an order that is already paid. Ignored; the capture stands.'
+          : 'An attempt failed. The order stays open so the customer can retry the same link.',
       },
     });
     return orderId;
   }
+
 
   // An order is only "paid" when the amount actually captured matches what we
   // charged. Without this, a webhook (or a link whose amount was edited) can

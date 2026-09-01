@@ -30,11 +30,13 @@ export function buildApp(): FastifyInstance {
   // real peer, so nothing is trusted at all.
   const trustedProxyHops = config.publicOrigin ? (_address: string, hop: number) => hop === 0 : false;
     const serverOptions: FastifyServerOptions = {
-      // Two lines per request, for a console that polls itself, buries every
-      // real event under thousands of 200s -- and the deploy log is where you
-      // look when something is actually wrong, on camera, with minutes to
-      // spare. Routine console reads are silenced; anything that writes, any
-      // agent call, and every non-2xx still logs.
+      // Two lines per request buries every real event under thousands of 200s
+      // -- and the deploy log is where you look when something is actually
+      // wrong, on camera, with minutes to spare. Fastify's own request logging
+      // is off and the onResponse hook below logs what is worth reading
+      // instead. Fastify 5 deprecates the top-level flag in favour of a full
+      // logController object; the flag still works and a partial controller
+      // does not typecheck, so this stays until the v6 upgrade forces it.
       disableRequestLogging: true,
       logger: process.env.KIRANA_QUIET
         ? false
@@ -409,6 +411,33 @@ export function buildApp(): FastifyInstance {
   });
 
   /**
+   * Last line of defence: a workspace id must never leave in a response body.
+   *
+   * A workspace id is the session cookie. It has now escaped twice -- once into
+   * the audit trail, once into the public shop directory -- and both times the
+   * mechanism was a field riding along in an object somebody serialised without
+   * reading. Allowlists at each route are the fix; this is the net under it,
+   * because the next leak will be in a route nobody is thinking about today.
+   *
+   * `/api/session*` is exempt: those routes return the CALLER's own id, which
+   * they already hold in their own cookie. Everything else that emits one is a
+   * bug, so it is redacted and logged loudly rather than quietly stripped.
+   */
+  const WS_TOKEN = /ws_[A-Za-z0-9_-]{16,}/g;
+  app.addHook('onSend', async (request, reply, payload) => {
+    const route = request.routeOptions?.url ?? '';
+    if (route.startsWith('/api/session')) return payload;
+    if (typeof payload !== 'string' || !payload.includes('ws_')) return payload;
+    const own = ws(request as never);
+    const stray = (payload.match(WS_TOKEN) ?? []).filter((t) => t !== own);
+    if (stray.length === 0) return payload;
+    request.log.error(
+      `BUG: ${route} tried to return ${stray.length} workspace id(s) in its body; redacted before sending.`,
+    );
+    return payload.replace(WS_TOKEN, (t) => (t === own ? t : 'ws_redacted'));
+  });
+
+  /**
    * Log what is worth reading: writes, agent traffic, and anything that failed.
    * A GET that returned 2xx on the console's own polling loop is noise.
    */
@@ -420,6 +449,48 @@ export function buildApp(): FastifyInstance {
       `${request.method} ${route} -> ${reply.statusCode}`,
     );
   });
+
+  /**
+   * The public shape of a shop. Built field by field, on purpose.
+   *
+   * This used to be `{ ...m }`, and a Merchant row carries `workspaceId` --
+   * which IS the session cookie. So the public shop directory published every
+   * merchant's session: a stranger with no cookie read
+   * `GET /api/merchants?scope=directory`, took an id, set it as `kirana_ws`,
+   * and was that merchant. Reproduced end to end before this fix.
+   *
+   * That is the second time a workspace id escaped into readable content --
+   * the audit trail was the first. A spread is what did it both times: it
+   * exports whatever the row happens to hold, including fields added later by
+   * someone who never looked at this line. An allowlist cannot do that.
+   */
+  const publicMerchant = (m: {
+    id: string; slug: string; name: string; originUrl: string; publicId?: string | null;
+    platform: string; currency: string; policies: unknown; ingestedAt: string;
+  }) => {
+    const run = latestRun(m.id);
+    return {
+      id: m.id,
+      slug: m.slug,
+      name: m.name,
+      originUrl: m.originUrl,
+      publicId: m.publicId ?? null,
+      platform: m.platform,
+      currency: m.currency,
+      policies: m.policies,
+      ingestedAt: m.ingestedAt,
+      products: run ? Number(run.product_count) : 0,
+      variants: run ? Number(run.variant_count) : 0,
+      adapter: run ? String(run.adapter) : null,
+      usedLlm: run ? Number(run.used_llm) === 1 : false,
+      warnings: run ? (JSON.parse(String(run.warnings)) as string[]) : [],
+      durationMs: run ? Number(run.duration_ms) : 0,
+      // public_id, not slug: the slug comes from the shop's hostname and is
+      // unique only within a workspace, so anyone re-ingesting the same shop
+      // made the published URL ambiguous and every agent using it got a 404.
+      mcpUrl: `${config.publicOrigin || `http://localhost:${config.port}`}/mcp/${m.publicId || m.slug}`,
+    };
+  };
 
   app.get('/health', async () => ({ ok: true, service: 'kirana', razorpay: config.razorpay.configured }));
 
@@ -436,22 +507,7 @@ export function buildApp(): FastifyInstance {
    * from a shop (its orders, approvals, agents, audit) stays scoped.
    */
   app.get('/api/merchants', async (request) =>
-    listMerchants(directoryScope(request as never)).map((m) => {
-      const run = latestRun(m.id);
-      return {
-        ...m,
-        products: run ? Number(run.product_count) : 0,
-        variants: run ? Number(run.variant_count) : 0,
-        adapter: run ? String(run.adapter) : null,
-        usedLlm: run ? Number(run.used_llm) === 1 : false,
-        warnings: run ? (JSON.parse(String(run.warnings)) as string[]) : [],
-        durationMs: run ? Number(run.duration_ms) : 0,
-        // public_id, not slug: the slug comes from the shop's hostname and is
-        // unique only within a workspace, so anyone re-ingesting the same shop
-        // made the published URL ambiguous and every agent using it got a 404.
-        mcpUrl: `${config.publicOrigin || `http://localhost:${config.port}`}/mcp/${m.publicId || m.slug}`,
-      };
-    }),
+    listMerchants(directoryScope(request as never)).map(publicMerchant),
   );
 
   app.post('/api/ingest', async (request, reply) => {
@@ -466,11 +522,8 @@ export function buildApp(): FastifyInstance {
       const report = await ingestStorefront(body.url, { workspaceId: ws(request as never) });
       enforceMerchantCap(ws(request as never));
       const merchant = getMerchant(report.merchantId)!;
-      return {
-        ...report,
-        merchant,
-        mcpUrl: `${config.publicOrigin || `http://localhost:${config.port}`}/mcp/${merchant.publicId || merchant.slug}`,
-      };
+      const shop = publicMerchant(merchant);
+      return { ...report, merchant: shop, mcpUrl: shop.mcpUrl };
     } catch (err) {
       if (err instanceof IngestError) return reply.code(422).send({ error: err.message, origin: err.origin });
       // IngestError messages are written for humans and are safe to return.
@@ -512,8 +565,25 @@ export function buildApp(): FastifyInstance {
   // Approvals — the human half of the loop.
   // -------------------------------------------------------------------------
 
+  /**
+   * Approvals do not widen for a self-selected role.
+   *
+   * `scopeFor` lets a visitor who picked the Razorpay persona READ across
+   * tenants, which is fine for orders and shops. It is not fine here: a
+   * pending approval published its `quoteId` and `consentId`, and that pair is
+   * a CAPABILITY. The open /mcp endpoint accepts exactly that pair plus a
+   * self-asserted agent name, so a stranger could take another tenant's
+   * approval, wait for their human to click yes, and spend it -- the
+   * human-in-the-loop guarantee bypassed across tenants, using two
+   * unauthenticated requests.
+   *
+   * Reading every tenant's queue now needs the operator token, like acting on
+   * one does. A visitor still sees their own, plus the shared demo shop's.
+   */
   app.get('/api/approvals', async (request) =>
-    listPendingConsents(scopeFor(request as never)).map((c) => {
+    listPendingConsents(
+      (request as never as { operator?: boolean }).operator ? undefined : ws(request as never),
+    ).map((c) => {
       const q = getQuote(c.quoteId);
       return {
         ...c,
@@ -561,7 +631,17 @@ export function buildApp(): FastifyInstance {
     const c = getConsent(id);
     if (!c) return reply.code(404).send({ error: 'not_found' });
     const q = getQuote(c.quoteId);
-    return { ...c, capFormatted: formatInr(c.capMinor), quote: q };
+    // The quote's HMAC signature is server-side evidence, not something a
+    // reader needs. It is re-derived at payment time from the stored row.
+    return {
+      ...c,
+      capFormatted: formatInr(c.capMinor),
+      quote: q && {
+        id: q.id, total: formatInr(q.totalMinor), totalMinor: q.totalMinor,
+        currency: q.currency, expiresAt: q.expiresAt, status: q.status,
+        lines: q.lines,
+      },
+    };
   });
 
   // -------------------------------------------------------------------------
@@ -586,7 +666,24 @@ export function buildApp(): FastifyInstance {
     if (!ownsViaShop(request as never, orderWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
     const o = getOrder(id);
     if (!o) return reply.code(404).send({ error: 'not_found' });
-    return { ...o, amountFormatted: formatInr(Number(o.amount_minor)), audit: forSubject(id, scopeFor(request as never)) };
+    // Allowlisted, not spread. `SELECT *` on orders carries workspace_id --
+    // the same shape that leaked a session id twice already -- and it also
+    // published quote_id and consent_id, which together are a capability the
+    // open MCP endpoint will spend.
+    return {
+      id: String(o.id),
+      status: String(o.status),
+      amountMinor: Number(o.amount_minor),
+      amountFormatted: formatInr(Number(o.amount_minor)),
+      currency: String(o.currency),
+      razorpayOrderId: (o.razorpay_order_id as string | null) ?? null,
+      razorpayPaymentId: (o.razorpay_payment_id as string | null) ?? null,
+      failureReason: (o.failure_reason as string | null) ?? null,
+      agentId: (o.agent_id as string | null) ?? null,
+      createdAt: String(o.created_at),
+      updatedAt: String(o.updated_at),
+      audit: forSubject(id, scopeFor(request as never)),
+    };
   });
 
   app.get('/api/agents', async (request) =>
@@ -613,7 +710,7 @@ export function buildApp(): FastifyInstance {
     const body = request.body as { label?: string; rotate?: boolean } | undefined;
     let issued;
     try {
-      issued = issueAgentKey(id, body?.label ?? id, 'console', { rotate: body?.rotate === true });
+      issued = issueAgentKey(id, body?.label ?? id, 'console', { rotate: body?.rotate === true, workspaceId: ws(request as never) });
     } catch (err) {
       return reply.code(409).send({ error: 'already_keyed', message: (err as Error).message });
     }
@@ -632,7 +729,10 @@ export function buildApp(): FastifyInstance {
   // can press that costs someone ELSE money: each sweep polls Razorpay once per
   // pending order, so a loop here is an amplifier pointed at the gateway.
   app.post('/api/reconcile', async (request, reply) => {
-    const limited = rateLimit(`reconcile:${ws(request as never) ?? request.ip ?? 'unknown'}`, 6, 60_000);
+    // Keyed on the ADDRESS, not the workspace: a workspace is minted free on
+    // any cookie-less request, so the old key gave an attacker a fresh bucket
+    // per request. Measured: 30 cookie-less calls, 30 accepted.
+    const limited = rateLimit(`reconcile:${request.ip || 'unknown'}`, 6, 60_000);
     if (!limited.ok) {
       return reply.code(429).header('retry-after', Math.ceil(limited.retryAfterMs / 1000))
         .send({ error: 'rate_limited', message: 'Reconciling too often. Try again shortly.' });

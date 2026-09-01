@@ -29,6 +29,7 @@ import { fetchOrderPayments, fetchPaymentLink, RazorpayError, CircuitOpenError, 
 export interface ReconcileReport {
   checked: number;
   settled: number;
+  expired: number;
   stillPending: number;
   failed: number;
   skipped: number;
@@ -54,30 +55,41 @@ const MIN_AGE_MS = 5_000;
  */
 const ABANDON_AFTER_MS = 6 * 60 * 60 * 1000;
 
+/** A checkout that never reached the gateway. Generous: two failed round-trips
+ *  plus retries is well under a minute, so ten is only ever a dead row. */
+const STUCK_AFTER_MS = 10 * 60 * 1000;
+
 export async function reconcile(opts: { limit?: number; rzpOptions?: CallOptions; minAgeMs?: number } = {}): Promise<ReconcileReport> {
   const report: ReconcileReport = {
-    checked: 0, settled: 0, stillPending: 0, failed: 0, skipped: 0, errors: [], ranAt: nowIso(),
+    checked: 0, settled: 0, expired: 0, stillPending: 0, failed: 0, skipped: 0, errors: [], ranAt: nowIso(),
   };
 
-  // Retire what can no longer be paid, so the window moves.
-  const abandonBefore = new Date(Date.now() - ABANDON_AFTER_MS).toISOString();
-  const abandoned = db.prepare(
-    "UPDATE orders SET status = 'expired', failure_reason = 'not paid before the payment link expired', updated_at = ? WHERE status = 'awaiting_payment' AND created_at <= ?",
-  ).run(nowIso(), abandonBefore);
-  if (Number(abandoned.changes) > 0) {
+  // A row stuck in `created` never reached the gateway: the process died
+  // between claiming it and the first network call. Nothing swept it (the poll
+  // selects `awaiting_payment`), nothing could query it (it has no gateway
+  // ids), and it counted against the daily cap forever. It is safe to close
+  // because no gateway object exists for it, and the human's approval was
+  // consumed for nothing.
+  const stuckBefore = new Date(Date.now() - STUCK_AFTER_MS).toISOString();
+  const stuck = db.prepare(
+    `UPDATE orders SET status = 'failed', failure_reason = ?, updated_at = ?
+     WHERE status = 'created' AND created_at <= ?
+       AND razorpay_order_id IS NULL AND razorpay_payment_link_id IS NULL`,
+  ).run('abandoned before reaching the gateway; nothing was charged', nowIso(), stuckBefore);
+  if (Number(stuck.changes) > 0) {
     record({
-      actor: 'system:reconciler', action: 'orders.expired', subjectId: null, outcome: 'ok',
-      detail: { count: Number(abandoned.changes), olderThanHours: ABANDON_AFTER_MS / 3600_000 },
+      actor: 'system:reconciler', action: 'orders.never_started', subjectId: null, outcome: 'ok',
+      detail: { count: Number(stuck.changes), note: 'No gateway object was ever created for these.' },
     });
   }
 
   const cutoff = new Date(Date.now() - (opts.minAgeMs ?? MIN_AGE_MS)).toISOString();
   const rows = db.prepare(
-    `SELECT id, razorpay_order_id, razorpay_payment_link_id FROM orders
+    `SELECT id, razorpay_order_id, razorpay_payment_link_id, created_at FROM orders
      WHERE status = 'awaiting_payment' AND updated_at <= ?
        AND (razorpay_order_id IS NOT NULL OR razorpay_payment_link_id IS NOT NULL)
      ORDER BY updated_at ASC LIMIT ?`,
-  ).all(cutoff, opts.limit ?? 25) as Array<{ id: string; razorpay_order_id: string | null; razorpay_payment_link_id: string | null }>;
+  ).all(cutoff, opts.limit ?? 25) as Array<{ id: string; razorpay_order_id: string | null; razorpay_payment_link_id: string | null; created_at: string }>;
 
   for (const row of rows) {
     report.checked++;
@@ -150,6 +162,30 @@ export async function reconcile(opts: { limit?: number; rzpOptions?: CallOptions
         report.stillPending++;
       } else {
         report.stillPending++;
+        // Only NOW may an old order be retired -- after the gateway has been
+        // asked and said no.
+        //
+        // This used to be a bare SQL sweep at the top of reconcile(), keyed on
+        // created_at alone and run before any polling. So a customer who paid
+        // while the reconciler was down -- a deploy, a crash, or the free tier
+        // sleeping for six hours, which it does after fifteen idle minutes --
+        // had their order marked `expired` on the very first sweep after it
+        // woke, without one request to Razorpay, while the gateway was holding
+        // the capture. `expired` is terminal, so the money was captured and
+        // the ledger permanently said unpaid.
+        //
+        // An order is only abandoned if we asked and it was not paid.
+        if (Date.parse(row.created_at) <= Date.now() - ABANDON_AFTER_MS) {
+          db.prepare(
+            "UPDATE orders SET status = 'expired', failure_reason = ?, updated_at = ? WHERE id = ? AND status = 'awaiting_payment'",
+          ).run('not paid before the payment link expired; confirmed unpaid at the gateway', nowIso(), row.id);
+          report.expired++;
+          record({
+            actor: 'system:reconciler', action: 'order.expired', subjectId: row.id, outcome: 'ok',
+            detail: { olderThanHours: ABANDON_AFTER_MS / 3600_000, confirmedUnpaid: true },
+          });
+          continue;
+        }
       }
 
       // Touch every row we looked at, settled or not. `ORDER BY updated_at ASC`

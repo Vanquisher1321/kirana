@@ -95,18 +95,28 @@ function agentCaps(agentId: string | null): { perOrder: number; daily: number; l
  * counted against a SHARED anonymous pool -- because an unverified id can be
  * rotated at will, and per-id accounting for a rotatable id is no accounting.
  */
+/**
+ * `created` counts. It is money in flight.
+ *
+ * An order is `created` from the moment its row is claimed until the gateway
+ * answers -- two awaited round-trips later. Counting only settled states meant
+ * every concurrent checkout was invisible to every other one's cap check, so
+ * six simultaneous requests authorised 11,976 rupees against a 10,000 ceiling
+ * while each one individually passed. The quote and consent claims are atomic;
+ * this aggregate was the one that was not.
+ */
 function spentTodayMinor(agentId: string | null, verified: boolean): number {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   if (verified && agentId) {
     const r = db.prepare(
       `SELECT COALESCE(SUM(amount_minor), 0) AS total FROM orders
-       WHERE created_at >= ? AND status IN ('paid','awaiting_payment') AND agent_id = ?`,
+       WHERE created_at >= ? AND status IN ('created','paid','awaiting_payment') AND agent_id = ?`,
     ).get(since, agentId) as { total?: number } | undefined;
     return Number(r?.total ?? 0);
   }
   const r = db.prepare(
     `SELECT COALESCE(SUM(amount_minor), 0) AS total FROM orders o
-     WHERE o.created_at >= ? AND o.status IN ('paid','awaiting_payment')
+     WHERE o.created_at >= ? AND o.status IN ('created','paid','awaiting_payment')
        AND (o.agent_id IS NULL OR o.agent_id IN (SELECT id FROM agents WHERE verified = 0))`,
   ).get(since) as { total?: number } | undefined;
   return Number(r?.total ?? 0);

@@ -96,7 +96,7 @@ export function listAgents(workspaceId?: string | null): Agent[] {
 }
 
 /** Issues a real key. The plaintext is returned once and never stored. */
-export function issueAgentKey(agentId: string, label: string, by = 'human', opts: { rotate?: boolean } = {}): { agent: Agent; apiKey: string } {
+export function issueAgentKey(agentId: string, label: string, by = 'human', opts: { rotate?: boolean; workspaceId?: string | null } = {}): { agent: Agent; apiKey: string } {
   const apiKey = newApiKey('kag');
   const existing = getAgent(agentId);
   if (existing?.verified && !opts.rotate) {
@@ -107,10 +107,14 @@ export function issueAgentKey(agentId: string, label: string, by = 'human', opts
   if (existing) {
     db.prepare('UPDATE agents SET api_key_hash = ?, verified = 1, label = ? WHERE id = ?').run(hashKey(apiKey), label, agentId);
   } else {
+    // workspace_id was omitted here, unlike in ensureAgent, so the console
+    // issued a key and instantly lost the agent: caps 404, rotation 404, and
+    // it never appeared in the issuer's own list, because `owns` is correctly
+    // strict about null. A verified agent nobody could govern.
     db.prepare(
-      `INSERT INTO agents (id, label, api_key_hash, daily_cap_minor, per_order_cap_minor, active, verified, created_at)
-       VALUES (?,?,?,?,?,1,1,?)`,
-    ).run(agentId, label, hashKey(apiKey), ANON_DAILY_CAP_MINOR, ANON_PER_ORDER_CAP_MINOR, nowIso());
+      `INSERT INTO agents (id, label, api_key_hash, daily_cap_minor, per_order_cap_minor, active, verified, created_at, workspace_id)
+       VALUES (?,?,?,?,?,1,1,?,?)`,
+    ).run(agentId, label, hashKey(apiKey), ANON_DAILY_CAP_MINOR, ANON_PER_ORDER_CAP_MINOR, nowIso(), opts.workspaceId ?? null);
   }
   record({
     actor: `human:${by}`, action: 'agent.key_issued', subjectId: agentId, outcome: 'ok',

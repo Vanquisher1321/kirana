@@ -35,9 +35,26 @@ function stripHtml(html: string): string {
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
     .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;|&rsquo;/g, "'")
-    .replace(/&quot;|&ldquo;|&rdquo;/g, '"')
+    // One pass, after the tags are gone. Chained replaces here decoded `&amp;`
+    // BEFORE `&lt;`, so `&amp;lt;script&amp;gt;` in a shop's body_html became
+    // a literal `<script>` in the stored description -- markup reconstructed
+    // after tag-stripping had already run.
+    .replace(
+      /&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|(nbsp|amp|lt|gt|quot|apos|rsquo|lsquo|ldquo|rdquo));/g,
+      (whole, dec?: string, hex?: string, name?: string) => {
+        if (dec !== undefined) return safeChar(Number(dec));
+        if (hex !== undefined) return safeChar(parseInt(hex, 16));
+        switch ((name ?? '').toLowerCase()) {
+          case 'nbsp': return ' ';
+          case 'amp': return '&';
+          case 'lt': return '<';
+          case 'gt': return '>';
+          case 'quot': case 'ldquo': case 'rdquo': return '"';
+          case 'apos': case 'rsquo': case 'lsquo': return "'";
+          default: return whole;
+        }
+      },
+    )
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -108,9 +125,12 @@ export const shopifyAdapter: StorefrontAdapter = {
         // a shop. Split on separators that are actually separators -- an
         // EM-dash counts (decoding produces them), and a hyphen only when it
         // is spaced, so a hyphenated brand name survives intact.
-        if (m?.[1]) shopName = decodeEntities(m[1]).split(/\s*[|\u2013\u2014\u00b7]\s*|\s+-\s+/)[0]!.trim() || shopName;
+        if (m?.[1]) shopName = decodeEntities(m[1]).slice(0, 400).split(/\s*[|\u2013\u2014\u00b7]\s*|\s+-\s+/)[0]!.trim() || shopName;
       }
     } catch { /* name is cosmetic; never fail ingestion over it */ }
+    // A shop's <title> is unbounded attacker-controlled text and this is
+    // stored, listed and handed to buying agents. 120 characters is a name.
+    shopName = shopName.replace(/\s+/gu, ' ').trim().slice(0, 120) || titleFromHost(new URL(origin).hostname);
 
     const collected: ShopifyProduct[] = [];
     for (let page = 1; collected.length < opts.maxProducts && page <= 20; page++) {
@@ -215,15 +235,30 @@ export const shopifyAdapter: StorefrontAdapter = {
  * attack surface for a cosmetic field.
  */
 function decodeEntities(text: string): string {
-  return text
-    .replace(/&#(\d+);/g, (_, d: string) => safeChar(Number(d)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, h: string) => safeChar(parseInt(h, 16)))
-    .replace(/&quot;/gi, '"')
-    .replace(/&apos;/gi, "'")
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&');   // last, so &amp;lt; does not become <
+  // ONE pass, so nothing this produces can be re-read as markup.
+  //
+  // The previous version chained .replace() calls with `&amp;` last, on the
+  // theory that ordering stopped `&amp;lt;` becoming `<`. It did, for that
+  // spelling -- but the NUMERIC pass ran first and its output was re-scanned
+  // by the later named passes, so `&#38;lt;script&#38;gt;` decoded all the way
+  // to `<script>`. A single pass over the original string cannot double-decode
+  // by construction, whatever spelling arrives.
+  return text.replace(
+    /&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|(quot|apos|lt|gt|nbsp|amp));/g,
+    (whole, dec?: string, hex?: string, name?: string) => {
+      if (dec !== undefined) return safeChar(Number(dec));
+      if (hex !== undefined) return safeChar(parseInt(hex, 16));
+      switch ((name ?? '').toLowerCase()) {
+        case 'quot': return '"';
+        case 'apos': return "'";
+        case 'lt': return '<';
+        case 'gt': return '>';
+        case 'nbsp': return ' ';
+        case 'amp': return '&';
+        default: return whole;
+      }
+    },
+  );
 }
 
 function safeChar(code: number): string {
