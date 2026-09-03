@@ -43,37 +43,40 @@ function Home({ data, refresh, onBlocked }: Pick<PersonaProps, 'data' | 'refresh
     <>
       <PageHead big title="Your AI shopping assistant" sub="It can find things and ask. It cannot spend without you." right={<Pill tone="ok">Active</Pill>} />
 
-      <div style={{ background: '#0F172A', color: '#fff', borderRadius: 16, padding: 24, marginBottom: 16 }}>
+      <div className="budget">
         <div className="row" style={{ gap: 20 }}>
           <div>
-            <div style={{ fontSize: 12, color: '#94A3B8', fontWeight: 500 }}>Spending today</div>
-            <div className="num" style={{ fontSize: 44, fontWeight: 600, letterSpacing: '-1.6px', marginTop: 4 }}>{inr(spent)}</div>
-            <div style={{ fontSize: 12, color: '#94A3B8' }}>of a {inr(DAILY_CAP_MINOR)} daily budget</div>
+            <div className="l">Spending today</div>
+            <div className="num big">{inr(spent)}</div>
+            <div className="l" style={{ marginTop: 6 }}>of a {inr(DAILY_CAP_MINOR)} daily budget</div>
           </div>
           <div style={{ flex: 1 }} />
-          <div className="row" style={{ gap: 28 }}>
+          <div className="row" style={{ gap: 30 }}>
             <div>
-              <div style={{ fontSize: 12, color: '#94A3B8' }}>Remaining</div>
-              <div className="num" style={{ fontSize: 20, fontWeight: 600, marginTop: 2, color: '#6EE7B7' }}>{inr(remaining)}</div>
+              <div className="l">Remaining</div>
+              <div className="num n left">{inr(remaining)}</div>
             </div>
             <div>
-              <div style={{ fontSize: 12, color: '#94A3B8' }}>Orders</div>
-              <div className="num" style={{ fontSize: 20, fontWeight: 600, marginTop: 2 }}>{data.orders.length}</div>
+              <div className="l">Orders</div>
+              <div className="num n">{data.orders.length}</div>
             </div>
           </div>
         </div>
-        <div style={{ height: 8, borderRadius: 5, background: 'rgba(255,255,255,.12)', marginTop: 20, overflow: 'hidden' }}>
-          <div style={{ width: `${pct}%`, height: '100%', background: '#6EE7B7' }} />
-        </div>
-        <div className="row" style={{ gap: 12, marginTop: 20, paddingTop: 18, borderTop: '1px solid rgba(255,255,255,.1)' }}>
-          <div style={{ width: 30, height: 30, borderRadius: 9, background: 'rgba(99,102,241,.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A5B4FC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+
+        <div className="track"><i style={{ width: `${pct}%` }} /></div>
+
+        <div className="foot">
+          <div className="shield">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
             </svg>
           </div>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>Per-order limit {inr(PER_ORDER_CAP_MINOR)}</div>
-            <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>A hard limit the platform enforces — you cannot raise it, and neither can your assistant</div>
+            <div className="cap">Per-order limit {inr(PER_ORDER_CAP_MINOR)}</div>
+            <div className="l" style={{ marginTop: 3 }}>
+              A hard limit the platform enforces — you cannot raise it, and neither can your assistant
+            </div>
           </div>
         </div>
       </div>
@@ -86,7 +89,7 @@ function Home({ data, refresh, onBlocked }: Pick<PersonaProps, 'data' | 'refresh
           </Empty>
         </Card>
       ) : data.approvals.map((a) => (
-        <div className="card enter" key={a.id} style={{ borderColor: 'var(--accent)', marginBottom: 16 }}>
+        <div className="card approval enter" key={a.id}>
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <div className="h2">Your assistant is asking to spend</div>
             <Pill tone="warn">Awaiting your approval</Pill>

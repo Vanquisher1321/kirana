@@ -5,6 +5,44 @@ import type { ReactNode } from 'react';
 
 export type Tone = 'ok' | 'bad' | 'warn' | 'flat';
 
+/**
+ * The mark.
+ *
+ * This used to be a gradient rounded square with a letter K in it — the
+ * default logo of every dashboard, and white-on-indigo at 4.3:1, under the
+ * contrast floor. It is a drawn shop now: a roof, a front, a door. It
+ * inherits currentColor, so it cannot fall below the contrast of the text
+ * beside it, and it says what the product is instead of spelling its initial.
+ */
+export function Mark({ size = 21 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" aria-hidden="true" focusable="false">
+      <path
+        d="M2.75 8.6h14.5V15a1.6 1.6 0 0 1-1.6 1.6H4.35A1.6 1.6 0 0 1 2.75 15V8.6Z"
+        stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"
+      />
+      <path
+        d="M2.75 8.6 4.2 3.4h11.6l1.45 5.2"
+        stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"
+      />
+      <path
+        d="M7.9 16.6v-4.35h4.2v4.35"
+        stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** A drawn check, not the ✓ glyph — a text character standing in for an icon
+ *  never matches the stroke weight of anything around it. */
+export function Check({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+      <path d="M3.5 8.4 6.4 11.3 12.5 4.9" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function Pill({ tone = 'flat', children }: { tone?: Tone; children: ReactNode }) {
   return <span className={`pill ${tone}`}><i className="d" />{children}</span>;
 }
@@ -23,12 +61,12 @@ export function Card({ title, sub, right, children }: { title?: string; sub?: st
   return (
     <div className="card">
       {(title || right) && (
-        <div className="row" style={{ justifyContent: 'space-between', marginBottom: sub ? 4 : 16 }}>
+        <div className="row" style={{ justifyContent: 'space-between', gap: 16, marginBottom: sub ? 6 : 18 }}>
           {title && <div className="h2">{title}</div>}
           {right}
         </div>
       )}
-      {sub && <div className="sub" style={{ marginBottom: 16, marginTop: 0 }}>{sub}</div>}
+      {sub && <div className="sub" style={{ marginBottom: 20, marginTop: 0 }}>{sub}</div>}
       {children}
     </div>
   );
@@ -36,9 +74,9 @@ export function Card({ title, sub, right, children }: { title?: string; sub?: st
 
 export function PageHead({ title, sub, right, big }: { title: string; sub?: string; right?: ReactNode; big?: boolean }) {
   return (
-    <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
-      <div>
-        <div className={big ? 'h1 big' : 'h1'}>{title}</div>
+    <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 20, marginBottom: 26 }}>
+      <div style={{ minWidth: 0 }}>
+        <h1 className={big ? 'h1 big' : 'h1'} style={{ margin: 0 }}>{title}</h1>
         {sub && <div className="sub">{sub}</div>}
       </div>
       {right}
@@ -63,7 +101,7 @@ export function Empty({ children }: { children: ReactNode }) {
  */
 export function Skeleton({ rows = 3 }: { rows?: number }) {
   return (
-    <div aria-hidden style={{ display: 'grid', gap: 10 }}>
+    <div aria-hidden style={{ display: 'grid', gap: 11 }}>
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="skel" style={{ width: `${100 - i * 12}%` }} />
       ))}

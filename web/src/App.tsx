@@ -7,6 +7,7 @@ import { timeAgo } from './plain.ts';
 import Merchant_ from './personas/Merchant.tsx';
 import Shopper from './personas/Shopper.tsx';
 import Platform from './personas/Platform.tsx';
+import { Mark } from './ui.tsx';
 
 export type Persona = 'merchant' | 'shopper' | 'platform';
 
@@ -161,7 +162,7 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="row" style={{ gap: 10 }}>
-          <div className="mark">K</div>
+          <div className="mark"><Mark /></div>
           <div className="brandname">Kirana</div>
           <div className="brandsub">Make any merchant AI-buyable</div>
         </div>
@@ -211,7 +212,7 @@ export default function App() {
           </button>
           <span className="live">
             <i className={`livedot ${paused ? 'bad' : ''}`} />
-            {paused ? 'Spending paused' : 'Live'}
+            {paused ? 'Spending paused' : 'Accepting AI payments'}
           </span>
           {demo && <span className="live sandbox">Sandbox · test mode</span>}
           {!demo && getToken() && (
@@ -266,7 +267,10 @@ export default function App() {
         </nav>
 
         <main className="main">
-          <div className={persona === 'shopper' ? 'page narrow' : 'page'}>
+          {/* Reading pages get a narrower column than data pages. The guide is
+              prose and one input; at 1240px it was a paragraph floating in a
+              field of nothing. */}
+          <div className={persona === 'shopper' || page === 'start' ? 'page narrow' : 'page'}>
             {demo && !needToken && (
               <div className="banner warn" style={{ marginBottom: 20 }}>
                 <span>
@@ -324,7 +328,7 @@ function ChooseRole({ onChosen }: { onChosen: (r: Persona) => Promise<void> }) {
     <div className="app">
       <header className="topbar">
         <div className="row" style={{ gap: 10 }}>
-          <div className="mark">K</div>
+          <div className="mark"><Mark /></div>
           <div className="brandname">Kirana</div>
           <div className="brandsub">Make any merchant AI-buyable</div>
         </div>
@@ -364,7 +368,7 @@ function Unlock({ onUnlocked }: { onUnlocked: () => void }) {
     <div className="app">
       <header className="topbar">
         <div className="row" style={{ gap: 10 }}>
-          <div className="mark">K</div>
+          <div className="mark"><Mark /></div>
           <div className="brandname">Kirana</div>
           <div className="brandsub">Make any merchant AI-buyable</div>
         </div>

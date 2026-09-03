@@ -101,6 +101,13 @@ artifacts/*
 *.swo
 *~
 .claude/settings.local.json
+
+# Third-party agent skills, installed locally so the design and review passes
+# have something to check against. They are somebody else's work and say
+# nothing about this project, so they stay out of a repo that is being read
+# to judge this one. Reinstall from their upstream repos; nothing here
+# depends on them at build or run time.
+.claude/skills/
 .DS_Store
 Thumbs.db
 ehthumbs.db

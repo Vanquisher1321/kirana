@@ -1,55 +1,137 @@
-/* Kirana console — design system ported from the AI Commerce dashboard.
-   Merchant and Shopper are light surfaces with their own accent; the Razorpay
-   platform console is dark. Same components, three skins. */
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+/* Kirana console — the visual system.
+ *
+ * A kirana is the shop on the corner: paper ledgers, a shutter, someone who
+ * knows your name. The first version of this console looked like every other
+ * dashboard — cold blue-grey, Inter at every size, a gradient square for a
+ * logo. It was competent and anonymous.
+ *
+ * So this is a warm-paper world instead. Ink on paper, one drawn mark, colour
+ * spent only where it carries meaning, and a real elevation scale so a card
+ * sits on the page rather than being drawn onto it. It still has to read as
+ * payments infrastructure, so the restraint is deliberate: the warmth is in
+ * the ground, never in saturated colour.
+ *
+ * Three rules the old file broke, all of them caught by a detector:
+ *   - nothing below 12.5px, and every text colour clears 4.5:1;
+ *   - the status dot no longer pulses, because since polling was removed it
+ *     was animating over data that never changes by itself;
+ *   - one authored motion moment (the approval card), not five scattered ones.
+ */
 
 :root {
-  --ink: #111827;
-  --ink-2: #374151;
-  --ink-3: #4B5563;
-  --muted: #6B7280;
-  --faint: #9CA3AF;
-  --line: #E7E9EE;
-  --line-2: #EEF0F3;
-  --line-3: #F3F4F6;
+  /* Ink. Warm, so it belongs to the paper rather than sitting on top of it.
+     Every one of these clears 4.5:1 on both --paper and --card. */
+  --ink: #1A1712;
+  --ink-2: #443D33;
+  --ink-3: #57503F;
+  --muted: #6B6357;   /* 5.44:1 on paper */
+  --faint: #746C5E;   /* 4.77:1 on paper — the floor, used sparingly */
+
+  /* Cool paper, warm ink.
+   *
+   * The first pass of this file used a warm cream ground, and a detector named
+   * it for what it was: the reflex "tasteful" surface, reached for because it
+   * is safe rather than because it means anything. The ground is ledger paper
+   * now — the pale grey-green of an accounts book — and the ink stays warm
+   * black on top of it. The tension between the two is the point; a page where
+   * paper and ink share a hue is a page nobody decided. */
+  --paper: #F4F6F1;
   --card: #FFFFFF;
-  --card-2: #FAFBFC;
+  --card-2: #F7F8F4;
+  --line: #E3E6DF;
+  --line-2: #EDEFE9;
+  --line-3: #F2F4EE;
 
-  --topbar: #0B1020;
-  --topbar-line: #1F2937;
-  --topbar-ink: #F9FAFB;
+  --topbar: #1C1813;
+  --topbar-line: #332C22;
+  --topbar-ink: #F5F0E6;
+  --topbar-dim: #A79D8C;
 
-  --ok: #16A34A;
-  --ok-deep: #15803D;
-  --ok-bg: #F0FDF4;
-  --ok-line: #BBF7D0;
-  --bad: #DC2626;
-  --bad-deep: #B91C1C;
-  --bad-bg: #FEF2F2;
-  --bad-line: #FECACA;
-  --warn: #D97706;
-  --warn-bg: #FFFBEB;
-  --warn-line: #FDE68A;
+  --ok: #197A4B;
+  --ok-deep: #14603B;
+  --ok-bg: #EEF7F1;
+  --ok-line: #C3E3D0;
+  --bad: #C2382B;
+  --bad-deep: #9E2D22;
+  --bad-bg: #FDF1EF;
+  --bad-line: #F3CDC7;
+  --warn: #9A6207;
+  --warn-bg: #FDF6E9;
+  --warn-line: #EDD9AE;
 
-  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  /* Depth. Offset plus soft blur, tinted with the ink rather than pure black,
+     so a raised surface looks lit rather than outlined. */
+  --sh-1: 0 1px 1px rgba(26,23,18,.04), 0 1px 3px rgba(26,23,18,.05);
+  --sh-2: 0 1px 2px rgba(26,23,18,.05), 0 6px 16px -4px rgba(26,23,18,.09);
+  --sh-3: 0 2px 4px rgba(26,23,18,.06), 0 16px 40px -8px rgba(26,23,18,.16);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
   --sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif;
+  --display: "Instrument Serif", Georgia, "Times New Roman", serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --r-sm: 7px;
+  --r: 10px;
+  --r-lg: 14px;
 }
 
-/* per-persona skin */
-.skin-merchant { --app-bg: #EDF1F7; --side-line: #E7E9EE; --accent: #4F46E5; --accent-deep: #3730A3; --accent-bg: #EEF2FF; --side-w: 236px; }
-.skin-shopper  { --app-bg: #E9F3EC; --side-line: #E3EAE5; --accent: #0F766E; --accent-deep: #115E59; --accent-bg: #ECFDF5; --accent-line: #A7F3D0; --side-w: 220px; }
+/* Per-persona skin. The hue is spent on selection, links and the mark; it is
+   never the primary button, which stays ink so the page has one loud thing. */
+.skin-merchant {
+  --app-bg: var(--paper);
+  --side: var(--card);
+  --side-line: var(--line);
+  --accent: #1E4FD8;          /* 6.6:1 on white */
+  --accent-deep: #163CA6;
+  --accent-bg: #EDF2FE;
+  --accent-line: #CBD9FA;
+  --side-w: 240px;
+}
+.skin-shopper {
+  --app-bg: var(--paper);
+  --side: var(--card);
+  --side-line: var(--line);
+  --accent: #0B6E4F;          /* 6.3:1 on white */
+  --accent-deep: #075139;
+  --accent-bg: #EDF6F1;
+  --accent-line: #C2E2D2;
+  --side-w: 228px;
+}
 .skin-platform {
-  --app-bg: #0B1020; --side-line: #1F2937; --accent: #6366F1; --accent-deep: #4F46E5;
-  --accent-bg: rgba(99,102,241,.16); --side-w: 236px;
-  --ink: #F9FAFB; --ink-2: #E5E7EB; --ink-3: #D1D5DB; --muted: #9CA3AF; --faint: #6B7280;
-  --card: #111827; --card-2: #0E1424; --line: #1F2937; --line-2: #1B2231; --line-3: #1F2937;
-  --ok-bg: rgba(22,163,74,.14); --ok-line: rgba(34,197,94,.3); --ok-deep: #6EE7B7;
-  --bad-bg: rgba(220,38,38,.16); --bad-line: rgba(220,38,38,.3); --bad-deep: #FCA5A5;
-  --warn-bg: rgba(217,119,6,.16); --warn-line: rgba(217,119,6,.32);
+  --app-bg: #14110D;
+  --side: #1D1913;
+  --side-line: #2C261D;
+  --accent: #9FB2FF;
+  --accent-deep: #B9C7FF;
+  --accent-bg: rgba(159,178,255,.14);
+  --accent-line: rgba(159,178,255,.28);
+  --side-w: 240px;
+
+  --ink: #F6F1E7;
+  --ink-2: #E0D9CB;
+  --ink-3: #CDC5B4;
+  --muted: #A79D8C;   /* 6.5:1 on the dark card */
+  --faint: #8B8271;   /* 4.6:1 */
+  --card: #1D1913;
+  --card-2: #191510;
+  --line: #2C261D;
+  --line-2: #251F18;
+  --line-3: #221D16;
+
+  --ok-bg: rgba(25,122,75,.18);
+  --ok-line: rgba(52,168,110,.34);
+  --ok-deep: #7FD8AC;
+  --bad-bg: rgba(194,56,43,.18);
+  --bad-line: rgba(194,56,43,.36);
+  --bad-deep: #F0A79D;
+  --warn-bg: rgba(154,98,7,.20);
+  --warn-line: rgba(200,140,40,.34);
+  --warn: #E9C07A;
+
+  --sh-1: 0 1px 2px rgba(0,0,0,.32);
+  --sh-2: 0 2px 4px rgba(0,0,0,.3), 0 8px 20px -6px rgba(0,0,0,.45);
+  --sh-3: 0 4px 8px rgba(0,0,0,.34), 0 20px 48px -10px rgba(0,0,0,.6);
 }
 
 * { box-sizing: border-box; }
@@ -57,95 +139,135 @@ html, body, #root { height: 100%; margin: 0; padding: 0; }
 
 body {
   font-family: var(--sans);
-  font-size: 13px;
+  font-size: 14px;
+  line-height: 1.5;
   color: var(--ink);
-  background: #F7F8FA;
+  background: var(--paper);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button { font: inherit; cursor: pointer; border: none; background: none; color: inherit; }
 input, select { font: inherit; }
-.num { font-variant-numeric: tabular-nums; }
-.mono { font-family: var(--mono); }
+.num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+.mono { font-family: var(--mono); font-size: .92em; }
+code.mono { background: var(--line-3); padding: 1px 5px; border-radius: 5px; }
 
-@keyframes fadeUp { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes pulseDot { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+/* ---------- browser surfaces ----------
+   The parts nobody draws still belong to the design: selection, the caret,
+   the scrollbar, the underline under a link. Left at their defaults they are
+   the tell that a page was assembled rather than built. */
+
+::selection { background: color-mix(in srgb, var(--accent) 24%, transparent); color: var(--ink); }
+:root, .skin-merchant, .skin-shopper, .skin-platform { caret-color: var(--accent); }
+
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; }
+
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--ink) 22%, transparent) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ink) 20%, transparent);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--ink) 34%, transparent); background-clip: content-box; }
+
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 
 /* ---------- shell ---------- */
 
 .app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
 .topbar {
-  display: flex; align-items: center; gap: 20px; padding: 0 20px;
-  height: 52px; flex: 0 0 52px;
+  display: flex; align-items: center; gap: 18px; padding: 0 20px;
+  height: 56px; flex: 0 0 56px;
   background: var(--topbar); color: var(--topbar-ink);
   border-bottom: 1px solid var(--topbar-line);
 }
-.mark {
-  width: 22px; height: 22px; border-radius: 6px;
-  background: linear-gradient(150deg, #6366F1, #2563EB);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 700; letter-spacing: -.4px;
-}
-.brandname { font-size: 13px; font-weight: 600; letter-spacing: -.1px; }
-.brandsub { font-size: 11px; color: var(--faint); padding-left: 10px; border-left: 1px solid var(--topbar-line); }
+.mark { display: flex; color: #F0C48A; }
+.mark svg { display: block; }
+.brandname { font-family: var(--display); font-size: 20px; font-weight: 400; letter-spacing: .1px; line-height: 1; }
+.brandsub { font-size: 12.5px; color: var(--topbar-dim); padding-left: 12px; border-left: 1px solid var(--topbar-line); }
 
-.personas { display: flex; gap: 2px; padding: 3px; background: #111827; border: 1px solid #1F2937; border-radius: 9px; }
-.persona { padding: 6px 14px; border-radius: 7px; font-size: 12px; font-weight: 600; color: #9CA3AF; transition: background .14s, color .14s, transform .16s var(--ease-out); }
-.persona:hover { color: #E5E7EB; }
-.persona:active { transform: scale(.97); }
-.persona[aria-selected="true"] { background: #F9FAFB; color: #0B1020; }
+.personas { display: flex; align-items: center; gap: 2px; padding: 3px; background: rgba(0,0,0,.28); border: 1px solid var(--topbar-line); border-radius: var(--r); }
+.persona { padding: 6px 13px; border-radius: var(--r-sm); font-size: 12.5px; font-weight: 600; color: var(--topbar-dim); transition: background .14s, color .14s; }
+.persona:hover { color: var(--topbar-ink); }
+.persona[aria-selected="true"] { background: var(--topbar-ink); color: var(--topbar); }
 
-.live.sandbox { color: #FCD34D; border-color: rgba(252, 211, 77, .28); background: rgba(252, 211, 77, .08); }
-.live { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid #1F2937; border-radius: 8px; font-size: 11px; font-weight: 600; color: #A5B4FC; }
-.livedot { width: 6px; height: 6px; border-radius: 50%; background: #22C55E; animation: pulseDot 2s infinite; }
-.livedot.bad { background: #DC2626; }
+.live { display: flex; align-items: center; gap: 7px; padding: 5px 11px; border: 1px solid var(--topbar-line); border-radius: var(--r-sm); font-size: 12.5px; font-weight: 500; color: var(--topbar-dim); }
+.live.sandbox { color: #F0C48A; border-color: rgba(240,196,138,.3); background: rgba(240,196,138,.09); }
+/* Static, deliberately. Nothing polls in the background any more, so a pulse
+   here would be animating over data that cannot change on its own. */
+.livedot { width: 7px; height: 7px; border-radius: 50%; background: #34A86E; flex: 0 0 7px; }
+.livedot.bad { background: #E06A5C; }
 
 .body { flex: 1; display: flex; min-height: 0; background: var(--app-bg); color: var(--ink); }
 
 .side {
   width: var(--side-w); flex: 0 0 var(--side-w);
-  background: var(--card); border-right: 1px solid var(--side-line);
-  display: flex; flex-direction: column; padding: 16px 12px;
+  background: var(--side); border-right: 1px solid var(--side-line);
+  display: flex; flex-direction: column; padding: 18px 12px 14px;
 }
-.sidehead { padding: 6px 10px 18px; }
-.sidehead .t { font-size: 13px; font-weight: 600; letter-spacing: -.1px; }
-.sidehead .s { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.sidehead { padding: 4px 10px 20px; }
+.sidehead .t { font-size: 15px; font-weight: 600; letter-spacing: -.2px; }
+.sidehead .s { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
 
-.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav { display: flex; flex-direction: column; gap: 1px; }
 .navitem {
   display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
-  padding: 8px 10px; border-radius: 8px; font-size: 13px; font-weight: 500;
-  color: var(--ink-2); transition: background .12s, color .12s, transform .16s var(--ease-out);
+  padding: 8px 10px; border-radius: var(--r-sm); font-size: 14px; font-weight: 500;
+  color: var(--ink-2); transition: background .12s, color .12s;
 }
-.navitem:hover { background: var(--line-3); }
-.navitem:active { transform: scale(.985); }
+.navitem:hover { background: var(--line-3); color: var(--ink); }
 .navitem[aria-selected="true"] { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
-.navbadge { margin-left: auto; font-size: 10px; font-weight: 600; color: var(--accent); background: var(--accent-bg); padding: 1px 6px; border-radius: 20px; }
-.navdiv { height: 1px; background: var(--line); margin: 8px 10px; }
+.navbadge {
+  margin-left: auto; font-size: 11.5px; font-weight: 600; min-width: 20px; text-align: center;
+  color: var(--accent); background: var(--accent-bg); border: 1px solid var(--accent-line);
+  padding: 0 6px; border-radius: 20px; font-variant-numeric: tabular-nums;
+}
+.navitem[aria-selected="true"] .navbadge { background: var(--card); }
+.navdiv { height: 1px; background: var(--line); margin: 10px 10px; }
 
-.sidefoot { border: 1px solid var(--side-line); border-radius: 10px; padding: 12px; background: var(--card-2); }
+.sidefoot { border: 1px solid var(--side-line); border-radius: var(--r); padding: 13px; background: var(--card-2); }
 
 .main { flex: 1; overflow: auto; min-width: 0; }
-.page { padding: 28px 32px 48px; max-width: 1240px; animation: fadeUp .16s var(--ease-out) both; }
-.page.narrow { max-width: 880px; }
+.page { padding: 34px 34px 64px; max-width: 1240px; }
+.page.narrow { max-width: 860px; }
 
-/* ---------- type ---------- */
+/* ---------- type ----------
+   Display is a serif with real character; UI text is Inter. One family per
+   job, an obvious step between them, and nothing under 12.5px. */
 
-.h1 { font-size: 26px; font-weight: 600; letter-spacing: -.6px; }
-.h1.big { font-size: 28px; letter-spacing: -.7px; }
-.h2 { font-size: 16px; font-weight: 600; letter-spacing: -.2px; }
-.sub { font-size: 13px; color: var(--muted); margin-top: 6px; }
+.h1 { font-family: var(--display); font-size: 32px; font-weight: 400; letter-spacing: -.2px; line-height: 1.12; }
+.h1.big { font-size: 38px; }
+.h2 { font-size: 16.5px; font-weight: 600; letter-spacing: -.15px; line-height: 1.3; }
+.sub { font-size: 14px; color: var(--muted); margin-top: 8px; max-width: 68ch; line-height: 1.55; }
 .dim { color: var(--muted); }
-.tiny { font-size: 11px; color: var(--muted); }
+.tiny { font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+strong { font-weight: 600; }
+
+/* More air above a heading than below it, so a section reads as a group. */
+.sechead {
+  font-size: 12.5px; font-weight: 600; color: var(--faint);
+  text-transform: uppercase; letter-spacing: .07em; margin: 36px 0 12px;
+}
 
 /* ---------- pieces ---------- */
 
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 22px; }
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg);
+  padding: 24px; box-shadow: var(--sh-1);
+}
 .card + .card { margin-top: 16px; }
 
-.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 20px; border: 1px solid transparent; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600;
+  padding: 3px 10px; border-radius: 20px; border: 1px solid transparent; white-space: nowrap;
+}
 .pill .d { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
 .pill.ok { color: var(--ok-deep); background: var(--ok-bg); border-color: var(--ok-line); }
 .pill.ok .d { background: var(--ok); }
@@ -154,65 +276,224 @@ input, select { font: inherit; }
 .pill.warn { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-line); }
 .pill.warn .d { background: var(--warn); }
 .pill.flat { color: var(--muted); background: var(--line-3); border-color: var(--line); }
+.pill.flat .d { background: var(--faint); }
 
 .kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 @media (min-width: 1080px) { .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .kpis.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.kpi { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
-.kpi .l { font-size: 12px; color: var(--muted); font-weight: 500; }
-.kpi .v { font-size: 22px; font-weight: 600; margin-top: 6px; letter-spacing: -.4px; }
-.kpi .s { font-size: 12px; color: var(--faint); margin-top: 4px; }
-.delta { font-size: 11.5px; font-weight: 600; color: var(--ok-deep); background: var(--ok-bg); border: 1px solid var(--ok-line); padding: 1px 7px; border-radius: 20px; margin-left: 8px; }
+.kpi {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg);
+  padding: 18px; box-shadow: var(--sh-1);
+}
+.kpi .l { font-size: 12.5px; color: var(--muted); font-weight: 500; }
+.kpi .v { font-size: 27px; font-weight: 600; margin-top: 8px; letter-spacing: -.6px; line-height: 1.1; }
+.kpi .s { font-size: 12.5px; color: var(--faint); margin-top: 6px; line-height: 1.45; }
+.delta {
+  font-size: 12px; font-weight: 600; color: var(--ok-deep); background: var(--ok-bg);
+  border: 1px solid var(--ok-line); padding: 1px 7px; border-radius: 20px; margin-left: 8px;
+  letter-spacing: 0; vertical-align: 3px;
+}
 
-.btn { font-size: 13px; font-weight: 600; color: #fff; background: var(--accent); border-radius: 9px; padding: 9px 16px; transition: background .14s, transform .16s var(--ease-out); }
-.btn:hover:not(:disabled) { background: var(--accent-deep); }
-.btn:active:not(:disabled) { transform: scale(.97); }
-.btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+/* The primary button is ink, not the accent. One loud thing per screen, and
+   the hue stays free to mean "this is where you are". */
+.btn {
+  font-size: 14px; font-weight: 600; color: var(--card); background: var(--ink);
+  border-radius: var(--r-sm); padding: 9px 16px; box-shadow: var(--sh-1);
+  transition: background .14s, box-shadow .14s, transform .12s var(--ease-out);
+}
+.btn:hover:not(:disabled) { background: var(--ink-2); box-shadow: var(--sh-2); }
+.btn:active:not(:disabled) { transform: translateY(1px); box-shadow: var(--sh-1); }
+.btn:disabled { opacity: .45; cursor: not-allowed; transform: none; box-shadow: none; }
 .btn.dark { background: var(--ink); color: var(--card); }
-.btn.ghost { background: var(--card); color: var(--ink-2); border: 1px solid var(--line); font-weight: 500; }
-.btn.ghost:hover:not(:disabled) { border-color: #C7CBD4; background: var(--card); }
-.btn.lg { font-size: 14px; padding: 11px 20px; }
-.btn.sm { font-size: 12px; padding: 6px 12px; }
+.btn.ghost {
+  background: var(--card); color: var(--ink-2); border: 1px solid var(--line);
+  font-weight: 500; box-shadow: none;
+}
+.btn.ghost:hover:not(:disabled) { background: var(--card-2); border-color: var(--faint); box-shadow: var(--sh-1); }
+.btn.lg { font-size: 15px; padding: 12px 22px; }
+/* Destructive. Its colours are fixed rather than themed: --bad flips to a pale
+   pink on the dark console, and the label colour follows --card, which is how
+   "Pause all AI spending" ended up as near-black text on red there. */
+.btn.danger { background: #C2382B; color: #fff; box-shadow: var(--sh-1); }
+.btn.danger:hover:not(:disabled) { background: #A32B20; }
+.btn.sm { font-size: 13px; padding: 6px 12px; }
 
-.field { flex: 1 1 300px; background: var(--card); border: 1px solid var(--line); color: var(--ink); border-radius: 9px; padding: 10px 13px; outline: none; }
-.field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.field {
+  flex: 1 1 300px; background: var(--card); border: 1px solid var(--line); color: var(--ink);
+  border-radius: var(--r-sm); padding: 10px 13px; outline: none;
+  transition: border-color .14s, box-shadow .14s;
+}
+.field::placeholder { color: var(--faint); }
+.field:hover { border-color: color-mix(in srgb, var(--ink) 28%, transparent); }
+.field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
 
 /* Keyboard focus was invisible: hover and disabled were styled, focus was not.
    :focus-visible keeps the ring off mouse clicks and on for keyboard users. */
 .btn:focus-visible,
 .navitem:focus-visible,
 .persona:focus-visible,
-.field:focus-visible {
+.field:focus-visible,
+a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.persona:focus-visible { outline-color: #A5B4FC; }
+.persona:focus-visible { outline-color: #F0C48A; }
+
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 
 table { width: 100%; border-collapse: collapse; }
-th { text-align: left; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 0 12px 10px; }
-td { font-size: 13px; padding: 12px; border-top: 1px solid var(--line-2); }
+th {
+  text-align: left; font-size: 12px; font-weight: 600; color: var(--faint);
+  text-transform: uppercase; letter-spacing: .06em; padding: 0 12px 11px;
+}
+td { font-size: 14px; padding: 13px 12px; border-top: 1px solid var(--line-2); vertical-align: top; }
+tbody tr { transition: background .12s; }
 tr:hover td { background: var(--card-2); }
 
-.bar { height: 6px; border-radius: 4px; background: var(--line-3); overflow: hidden; }
-.bar > i { display: block; height: 100%; background: var(--accent); }
+.bar { height: 7px; border-radius: 4px; background: var(--line-3); overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
 
-.empty { color: var(--faint); text-align: center; padding: 40px 0; font-size: 13px; }
+.empty { color: var(--faint); text-align: center; padding: 44px 0; font-size: 14px; }
 
-.banner { border-radius: 10px; padding: 13px 16px; font-size: 13px; display: flex; align-items: center; gap: 12px; }
+.banner {
+  border-radius: var(--r); padding: 14px 16px; font-size: 14px;
+  display: flex; align-items: center; gap: 12px; line-height: 1.5;
+}
 .banner.ok { background: var(--ok-bg); border: 1px solid var(--ok-line); color: var(--ok-deep); }
 .banner.bad { background: var(--bad-bg); border: 1px solid var(--bad-line); color: var(--bad-deep); }
 .banner.warn { background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn); }
 
-.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: -2px; }
-
-@media (max-width: 860px) {
-  .side { display: none; }
-  .page { padding: 20px 16px 40px; }
-  .brandsub { display: none; }
+.spin {
+  display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor;
+  border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite;
+  vertical-align: -2px;
 }
 
-/* Motion here only ever explains arrival and liveness, so removing it costs
+/* Skeletons. A slow, low-contrast sweep — this is a waiting state, not an
+   event, so it must not compete with content that is about to arrive. */
+.skel {
+  height: 15px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--line-3) 25%, var(--line-2) 37%, var(--line-3) 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* The one authored moment.
+ *
+ * Every page used to slide up on arrival, which made navigation feel laggy and
+ * spent the effect on nothing. The approval card is the product's actual
+ * event — money is about to move and a person has to decide — so it is the
+ * only thing that gets an entrance. Never from scale(0): nothing in the world
+ * appears out of nothing. */
+.enter { animation: enterCard .32s var(--ease-out) both; }
+@keyframes enterCard {
+  from { opacity: 0; transform: translateY(8px) scale(.985); filter: blur(3px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+
+.shopsel {
+  background: var(--card); border: 1px solid var(--line); color: var(--ink);
+  border-radius: var(--r-sm); padding: 7px 11px; font-size: 14px; font-weight: 500; outline: none;
+}
+.shopsel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Role selection and the demo-only role switch. */
+.rolecard {
+  display: block; width: 100%; text-align: left;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg);
+  padding: 22px 24px; box-shadow: var(--sh-1);
+  transition: border-color .14s, box-shadow .18s, transform .14s var(--ease-out);
+}
+.rolecard:hover:not(:disabled) { border-color: var(--accent); box-shadow: var(--sh-2); transform: translateY(-1px); }
+.rolecard:active:not(:disabled) { transform: none; box-shadow: var(--sh-1); }
+.rolecard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rolecard:disabled { opacity: .55; cursor: not-allowed; }
+
+.demoswitch { font-size: 12.5px; color: var(--topbar-dim); padding: 0 8px 0 5px; }
+.rolechip {
+  display: inline-flex; align-items: center; padding: 6px 12px; border-radius: var(--r-sm);
+  background: rgba(0,0,0,.28); border: 1px solid var(--topbar-line); color: var(--topbar-ink);
+  font-size: 12.5px; font-weight: 600;
+}
+
+/* Reviewer mode. Discoverable but clearly not part of the product — a real
+   account never sees more than its own console. */
+.reviewbtn {
+  font-size: 12.5px; font-weight: 500; color: var(--topbar-ink);
+  border: 1px dashed rgba(245,240,230,.32); border-radius: var(--r-sm);
+  padding: 5px 11px; transition: background .14s, border-color .14s;
+}
+.reviewbtn:hover:not(:disabled) { background: rgba(245,240,230,.09); border-color: rgba(245,240,230,.6); }
+.reviewbtn:disabled { opacity: .5; cursor: not-allowed; }
+.reviewbtn:focus-visible { outline: 2px solid #F0C48A; outline-offset: 2px; }
+.reviewbtn.off { color: var(--topbar-dim); border-color: var(--topbar-line); }
+
+@media (max-width: 980px) {
+  .side { display: none; }
+  .topbar { overflow-x: auto; overflow-y: hidden; gap: 12px; padding: 0 14px; scrollbar-width: none; }
+  .topbar::-webkit-scrollbar { display: none; }
+  .topbar .row, .topbar .personas, .topbar .live, .topbar .rolechip, .topbar .reviewbtn { flex-shrink: 0; }
+  .topbar .row { flex-wrap: nowrap; }
+  .brandname, .persona, .live, .rolechip, .reviewbtn, .demoswitch { white-space: nowrap; }
+  .page { padding: 22px 18px 48px; }
+  .brandsub { display: none; }
+  .h1 { font-size: 27px; }
+  .h1.big { font-size: 30px; }
+}
+
+/* A card inside a card is the same container drawn twice, and four bordered
+   tiles inside a bordered panel is what it looked like. Inside a card a stat
+   drops its own surface and is separated by a hairline instead. */
+.card .kpi { background: transparent; border: 0; box-shadow: none; padding: 0 26px; }
+.card .kpis { gap: 0; }
+.card .kpi:first-child { padding-left: 0; }
+.card .kpi:last-child { padding-right: 0; }
+.card .kpi + .kpi { border-left: 1px solid var(--line); }
+@media (max-width: 1079px) {
+  .card .kpis { gap: 22px 0; }
+  .card .kpi:nth-child(2n+1) { padding-left: 0; border-left: 0; }
+}
+
+/* Long-form copy gets a measure wherever it sits. A line of prose running the
+   full width of a 1200px card is unreadable however good the type is. */
+.prose { max-width: 68ch; }
+
+/* ---------- the shopper's budget panel ----------
+   The one dark surface in a light console, because a spending ceiling is the
+   fact the shopper came to check. It used to be a cold slate-blue island in a
+   warm room and eight loose hex values; it is one component now, tuned to the
+   same warm dark as the topbar. */
+
+.budget {
+  background: var(--topbar); color: var(--topbar-ink);
+  border-radius: var(--r-lg); padding: 26px; margin-bottom: 18px; box-shadow: var(--sh-2);
+}
+.budget .l { font-size: 12.5px; color: var(--topbar-dim); font-weight: 500; }
+.budget .big { font-size: 46px; font-weight: 600; letter-spacing: -1.8px; margin-top: 6px; line-height: 1; }
+.budget .n { font-size: 21px; font-weight: 600; margin-top: 3px; }
+.budget .n.left { color: #6FCF9A; }
+.budget .track { height: 8px; border-radius: 5px; background: rgba(245,240,230,.12); margin-top: 24px; overflow: hidden; }
+.budget .track > i { display: block; height: 100%; background: #6FCF9A; border-radius: 5px; }
+.budget .foot {
+  display: flex; gap: 13px; align-items: flex-start;
+  margin-top: 22px; padding-top: 20px; border-top: 1px solid rgba(245,240,230,.11);
+}
+.budget .shield {
+  width: 32px; height: 32px; border-radius: 9px; flex: 0 0 32px; display: grid; place-items: center;
+  background: rgba(240,196,138,.14); color: #F0C48A;
+}
+.budget .cap { font-size: 14px; font-weight: 600; }
+
+/* The approval is the decision the whole product exists to protect, so it is
+   the one card that leaves the flat elevation of the page. */
+.card.approval { border-color: var(--accent); box-shadow: var(--sh-3); margin-bottom: 16px; }
+
+@media (max-width: 980px) {
+  .budget .big { font-size: 38px; }
+}
+
+/* Motion here only ever explains arrival and waiting, so removing it costs
    nothing. Anyone who has asked their system to reduce motion gets the same
    interface, still. */
 @media (prefers-reduced-motion: reduce) {
@@ -222,59 +503,3 @@ tr:hover td { background: var(--card-2); }
     transition-duration: .001ms !important;
   }
 }
-
-/* Skeletons. A slow, low-contrast sweep — this is a waiting state, not an
-   event, so it must not compete with content that is about to arrive. */
-.skel {
-  height: 14px;
-  border-radius: 6px;
-  background: linear-gradient(90deg, var(--line-3) 25%, var(--line-2) 37%, var(--line-3) 63%);
-  background-size: 400% 100%;
-  animation: shimmer 1.4s linear infinite;
-}
-@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
-
-/* The approval card is the product's one important moment and appears
-   occasionally, so it earns a real entrance. Never from scale(0) — nothing in
-   the world appears out of nothing — so it starts at 0.98 with opacity. */
-.enter { animation: enterCard .22s var(--ease-out) both; }
-@keyframes enterCard {
-  from { opacity: 0; transform: scale(.98) translateY(4px); }
-  to { opacity: 1; transform: none; }
-}
-
-/* Rows that lead somewhere should say so on hover. */
-tbody tr { transition: background .12s; }
-
-.sechead { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 28px 0 12px; }
-.shopsel { background: var(--card); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 6px 10px; font-size: 13px; font-weight: 500; outline: none; }
-.shopsel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-/* Role selection and the demo-only role switch. */
-.rolecard {
-  display: block; width: 100%; text-align: left;
-  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
-  padding: 20px 22px; transition: border-color .14s, transform .16s var(--ease-out);
-}
-.rolecard:hover:not(:disabled) { border-color: var(--accent); }
-.rolecard:active:not(:disabled) { transform: scale(.995); }
-.rolecard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.rolecard:disabled { opacity: .6; cursor: not-allowed; }
-
-.demoswitch { font-size: 11px; color: #6B7280; padding: 0 8px 0 4px; letter-spacing: .02em; }
-.rolechip {
-  display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 8px;
-  background: #111827; border: 1px solid #1F2937; color: #E5E7EB;
-  font-size: 12px; font-weight: 600;
-}
-
-/* Reviewer mode. Discoverable but clearly not part of the product — a real
-   account never sees more than its own console. */
-.reviewbtn {
-  font-size: 11.5px; font-weight: 600; color: #A5B4FC;
-  border: 1px dashed rgba(165, 180, 252, .4); border-radius: 8px;
-  padding: 5px 11px; transition: background .14s, border-color .14s;
-}
-.reviewbtn:hover { background: rgba(99, 102, 241, .12); border-color: rgba(165, 180, 252, .7); }
-.reviewbtn:focus-visible { outline: 2px solid #A5B4FC; outline-offset: 2px; }
-.reviewbtn.off { color: #9CA3AF; border-color: #1F2937; }

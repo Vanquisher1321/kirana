@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from './api.ts';
-import { Card, PageHead } from './ui.tsx';
+import { Card, Check, PageHead } from './ui.tsx';
 import type { PersonaProps } from './App.tsx';
 
 /**
@@ -15,25 +15,35 @@ import type { PersonaProps } from './App.tsx';
  * than a checkbox, so this doubles as a status page once setup is finished.
  */
 
-function Step({ n, title, done, children }: {
-  n: number; title: string; done: boolean; children: React.ReactNode;
+function Step({ n, title, done, last, children }: {
+  n: number; title: string; done: boolean; last?: boolean; children: React.ReactNode;
 }) {
   return (
-    <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 22 }}>
-      <div
-        aria-hidden
-        style={{
-          flex: '0 0 28px', height: 28, borderRadius: 999, display: 'grid', placeItems: 'center',
-          fontSize: 13, fontWeight: 600, marginTop: 2,
-          background: done ? '#0F766E' : 'rgba(127,127,127,0.16)',
-          color: done ? '#fff' : 'inherit',
-        }}
-      >
-        {done ? '\u2713' : n}
+    <div style={{ display: 'flex', gap: 16, alignItems: 'stretch' }}>
+      {/* The rail is the sequence. Three numbered circles floating in space
+          read as three unrelated things; a line joining them reads as one
+          path with a beginning and an end. */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: '0 0 30px' }}>
+        <div
+          aria-hidden
+          style={{
+            width: 30, height: 30, borderRadius: 999, display: 'grid', placeItems: 'center',
+            fontSize: 13.5, fontWeight: 600, fontVariantNumeric: 'tabular-nums', flex: '0 0 30px',
+            background: done ? 'var(--accent)' : 'var(--card)',
+            color: done ? '#fff' : 'var(--muted)',
+            border: done ? '1px solid var(--accent)' : '1px solid var(--line)',
+            boxShadow: done ? 'var(--sh-1)' : 'none',
+          }}
+        >
+          {done ? <Check /> : n}
+        </div>
+        {!last && (
+          <div aria-hidden style={{ flex: 1, width: 1, background: 'var(--line)', margin: '6px 0' }} />
+        )}
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="h2" style={{ margin: 0, opacity: done ? 0.65 : 1 }}>{title}</div>
-        <div style={{ marginTop: 8 }}>{children}</div>
+      <div className="prose" style={{ flex: 1, minWidth: 0, paddingBottom: last ? 0 : 30 }}>
+        <div className="h2" style={{ marginTop: 5, opacity: done ? 0.7 : 1 }}>{title}</div>
+        <div style={{ marginTop: 10 }}>{children}</div>
       </div>
     </div>
   );
@@ -44,7 +54,14 @@ function UseThisLink({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <>
-      <div className="mono tiny" style={{ wordBreak: 'break-all', marginBottom: 8 }}>{url}</div>
+      <div
+        className="mono"
+        style={{
+          wordBreak: 'break-all', marginBottom: 12, padding: '11px 13px', fontSize: 13,
+          background: 'var(--card-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)',
+          color: 'var(--ink-2)', userSelect: 'all',
+        }}
+      >{url}</div>
       <button
         className="btn"
         onClick={() => { void navigator.clipboard?.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1600); }}
@@ -129,7 +146,7 @@ export function MerchantStart({ data, refresh, onBlocked }: PersonaProps) {
             : <div className="tiny dim">Appears here once your shop is connected.</div>}
         </Step>
 
-        <Step n={3} title="An assistant shops, you stay in control" done={visited}>
+        <Step n={3} last title="An assistant shops, you stay in control" done={visited}>
           <div className="tiny dim" style={{ lineHeight: 1.6 }}>
             {visited
               ? `${data.agents.length} assistant${data.agents.length === 1 ? ' has' : 's have'} visited your shop. Each one starts on a low spending ceiling that only you can raise.`
@@ -198,7 +215,7 @@ export function ShopperStart({ data, refresh, onBlocked }: PersonaProps) {
             : <div className="tiny dim">Appears here once there is a shop to buy from.</div>}
         </Step>
 
-        <Step n={3} title="Approve what it asks for" done={data.orders.length > 0}>
+        <Step n={3} last title="Approve what it asks for" done={data.orders.length > 0}>
           <div className="tiny dim" style={{ lineHeight: 1.6 }}>
             Your assistant can search and price anything, but it cannot pay. When it wants to
             spend, the request appears on your Home screen with the exact basket, the exact

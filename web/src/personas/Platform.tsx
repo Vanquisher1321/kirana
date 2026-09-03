@@ -216,7 +216,7 @@ function Risk({ data, refresh, onBlocked }: Pick<PersonaProps, 'data' | 'refresh
 
       <Card title="Stop everything" sub="Immediately prevents any AI assistant from spending, whatever it is in the middle of. Approvals already given stop working too.">
         {paused && <div className="banner bad" style={{ marginBottom: 14 }}>AI spending is paused platform-wide. Nothing can be charged.</div>}
-        <button className="btn lg" style={paused ? undefined : { background: 'var(--bad)' }} disabled={busy} onClick={() => void toggle()}>
+        <button className={paused ? 'btn lg' : 'btn lg danger'} disabled={busy} onClick={() => void toggle()}>
           {paused ? 'Allow AI spending again' : 'Pause all AI spending'}
         </button>
       </Card>
