@@ -1,5 +1,6 @@
 import { lookup } from 'node:dns/promises';
-import { timingSafeEqual, createHash, randomBytes } from 'node:crypto';
+import { timingSafeEqual, createHash, createHmac, randomBytes } from 'node:crypto';
+import { config } from './config.ts';
 import { isIP } from 'node:net';
 
 /**
@@ -209,8 +210,33 @@ export function secretEquals(a: string, b: string): boolean {
   return timingSafeEqual(ha, hb) && a.length > 0;
 }
 
+/**
+ * How an agent API key is stored.
+ *
+ * CodeQL flags a fast hash here as "insufficient computational effort", and
+ * that rule is right about PASSWORDS and wrong about this. bcrypt and scrypt
+ * are slow on purpose to make guessing a human-chosen secret expensive. These
+ * keys are `newApiKey`'s 24 random bytes -- 192 bits from a CSPRNG. There is
+ * no dictionary to try and no cost factor that meaningfully changes the odds
+ * of guessing one; all a slow KDF would buy is a deliberate delay on every
+ * agent request, which is a denial-of-service lever rather than a defence.
+ *
+ * What IS worth having is a keyed hash. Plain SHA-256 of a token means anyone
+ * who steals the database file can verify guesses offline against it forever.
+ * HMAC under the signing secret means a stolen database is inert without also
+ * stealing the secret, which lives in the environment and never in the file.
+ * Same cost, strictly better posture -- so this is HMAC rather than a bare
+ * digest, and deliberately still fast.
+ *
+ * One consequence, stated because it is a real operational edge: rotating
+ * KIRANA_SIGNING_SECRET invalidates every issued agent key. That is the
+ * correct behaviour -- rotating the secret SHOULD revoke credentials derived
+ * from it -- but if the secret is left unset the server mints an ephemeral one
+ * per boot, and then agent keys stop working on restart. config.ts already
+ * warns loudly about that case for quotes; it now applies to keys too.
+ */
 export function hashKey(key: string): string {
-  return createHash('sha256').update(key).digest('hex');
+  return createHmac('sha256', config.signingSecret).update(key).digest('hex');
 }
 
 export function newApiKey(prefix: string): string {

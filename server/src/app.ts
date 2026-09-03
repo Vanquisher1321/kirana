@@ -547,7 +547,13 @@ export function buildApp(): FastifyInstance {
     }));
   });
 
-  app.get('/api/audit', async (request) => {
+  app.get('/api/audit', async (request, reply) => {
+    // Bounded by `limit`, but a thousand rows a call is still worth a budget.
+    const limited = rateLimit(`audit:${request.ip || 'unknown'}`, 60, 60_000);
+    if (!limited.ok) {
+      return reply.code(429).header('retry-after', Math.ceil(limited.retryAfterMs / 1000))
+        .send({ error: 'rate_limited', message: 'Too many audit reads. Try again shortly.' });
+    }
     const { subject, limit: rawLimit } = request.query as { subject?: string; limit?: string };
     // `?limit=abc` used to reach SQLite and come back as
     // {"code":"ERR_SQLITE_ERROR","message":"datatype mismatch"} -- engine
@@ -559,7 +565,25 @@ export function buildApp(): FastifyInstance {
       : auditList(limit, scopeFor(request as never));
   });
 
-  app.get('/api/audit/verify', async () => auditVerify());
+  /**
+   * The one endpoint whose cost grows without bound.
+   *
+   * verify() re-reads and re-hashes EVERY row in the audit log, so it is
+   * O(rows ever written) per call and gets slower for the life of the
+   * instance. It is also the most attractive thing on the server to hammer:
+   * unauthenticated, cheap to ask for, expensive to answer. Keyed on the
+   * address rather than the workspace, because a workspace is minted free on
+   * any cookie-less request and would hand an attacker a fresh bucket per
+   * call.
+   */
+  app.get('/api/audit/verify', async (request, reply) => {
+    const limited = rateLimit(`verify:${request.ip || 'unknown'}`, 12, 60_000);
+    if (!limited.ok) {
+      return reply.code(429).header('retry-after', Math.ceil(limited.retryAfterMs / 1000))
+        .send({ error: 'rate_limited', message: 'Verifying the chain is expensive. Try again shortly.' });
+    }
+    return auditVerify();
+  });
 
   // -------------------------------------------------------------------------
   // Approvals — the human half of the loop.

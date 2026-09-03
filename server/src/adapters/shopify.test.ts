@@ -140,3 +140,33 @@ test('a shop name survives HTML entities and a silent homepage', async () => {
   const fallback = await shopifyAdapter.ingest('https://gymshark.test', silentFetch as never, { maxProducts: 50 });
   assert.equal(fallback.merchant.name, 'Gymshark', 'the domain becomes a name, not a URL');
 });
+
+test('SECURITY: hostile markup cannot be smuggled through the text extractors', async () => {
+  const { decodeEntitiesForTest: dec, stripHtmlForTest: strip } = await import('./shopify.ts');
+
+  // Numeric refs were decoded FIRST and their output re-scanned by the named
+  // passes, so the numeric spelling of & walked a whole tag through.
+  for (const smuggled of ['&#38;lt;script&#38;gt;', '&#x26;lt;b&#x26;gt;', '&#0000038;lt;i&#38;gt;']) {
+    assert.equal(dec(smuggled).includes('<'), false, `double-decoded: ${smuggled}`);
+  }
+  assert.equal(dec('&amp;lt;script&amp;gt;'), '&lt;script&gt;');
+  assert.equal(dec('Dot &amp; Key'), 'Dot & Key');
+  assert.equal(/[\u0000-\u001f]/.test(dec('a&#0;b&#13;c')), false, 'control characters never survive');
+
+  // Single-pass tag removal spliced a valid tag back together out of its own
+  // removal, and a quoted ">" inside an attribute ended the tag early.
+  const defeats: Array<[string, string]> = [
+    ['nested splice', '<scr<script>ipt>alert(1)</scr</script>ipt>'],
+    ['quoted gt in attribute', '<a title="a>b" onclick="steal()">link</a>'],
+    ['style block', '<style>p{color:red}</style>hello'],
+    ['comment wrapping a tag', '<!-- <script>bad</script> -->ok'],
+    ['unterminated tag', 'text<div class='],
+  ];
+  for (const [name, input] of defeats) {
+    const out = strip(input);
+    assert.equal(/<[a-zA-Z/]/.test(out), false, `${name}: markup survived as ${JSON.stringify(out)}`);
+    assert.equal(out.includes('onclick'), false, `${name}: an attribute leaked as text`);
+  }
+  assert.equal(strip('<p>hi</p>&amp;lt;script&amp;gt;').includes('<script>'), false,
+    'entities must not rebuild a tag after stripping has already run');
+});

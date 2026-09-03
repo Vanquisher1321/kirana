@@ -15,7 +15,10 @@ export interface CatalogProduct {
 }
 
 export interface Merchant {
-  id: string; slug: string; publicId: string; workspaceId: string | null;
+  // No workspaceId. The server stopped sending it after the public shop
+  // directory published every merchant's session id; a type that still says
+  // it might arrive is a standing invitation for that to come back unnoticed.
+  id: string; slug: string; publicId: string;
   name: string; originUrl: string; platform: string;
   currency: string; ingestedAt: string; products: number; variants: number;
   adapter: string | null; usedLlm: boolean; warnings: string[]; durationMs: number; mcpUrl: string;
@@ -47,7 +50,6 @@ export interface SystemState {
 }
 export type Role = 'merchant' | 'shopper' | 'platform';
 export interface Session {
-  workspaceId: string;
   role: Role | null;
   fullAccess: boolean;
   canEnableFullAccess: boolean;

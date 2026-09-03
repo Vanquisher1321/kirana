@@ -28,13 +28,80 @@ interface ShopifyProduct {
   options?: Array<{ name: string }> | null;
 }
 
+/**
+ * Turn a shop's `body_html` into plain text.
+ *
+ * Written as a small scanner rather than a chain of `.replace()` calls,
+ * because a single regex pass is not a sanitiser and CodeQL is right to say
+ * so. Two concrete defeats of the old version:
+ *
+ *   - `<scr<script>ipt>alert(1)</scr</script>ipt>` -- removing the inner
+ *     `<script>` once splices the outer one back into a valid tag. Any
+ *     single-pass removal has this property; only running to a fixed point
+ *     does not.
+ *   - `<a title="a>b" onclick=...>` -- `<[^>]+>` stops at the `>` INSIDE the
+ *     quoted attribute, leaving `b" onclick=...>` as visible text.
+ *
+ * This walks the string once, tracking whether it is inside a quoted attribute
+ * value, so a `>` in an attribute cannot end a tag; then it repeats until the
+ * output stops changing, so nothing can be reassembled by its own removal. The
+ * result is stored and shown as text and never as markup, but "it is not
+ * rendered as HTML today" is a property of the consumer, not of this function.
+ */
+function stripTagsOnce(input: string): string {
+  let out = '';
+  let i = 0;
+  while (i < input.length) {
+    if (input[i] !== '<') { out += input[i]; i++; continue; }
+    // Comments and CDATA-ish constructs.
+    if (input.startsWith('<!--', i)) {
+      const end = input.indexOf('-->', i + 4);
+      i = end === -1 ? input.length : end + 3;
+      continue;
+    }
+    let j = i + 1;
+    let quote: string | null = null;
+    while (j < input.length) {
+      const ch = input[j]!;
+      if (quote) { if (ch === quote) quote = null; }
+      else if (ch === '"' || ch === "'") quote = ch;
+      else if (ch === '>') break;
+      j++;
+    }
+    if (j >= input.length) { i = input.length; break; }   // unterminated tag: drop the rest
+    const tag = input.slice(i + 1, j).trim();
+    const name = (/^\/?\s*([a-zA-Z0-9]+)/.exec(tag)?.[1] ?? '').toLowerCase();
+    if (name === 'br' || (tag.startsWith('/') && ['p', 'div', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(name))) {
+      out += '\n';
+    }
+    i = j + 1;
+  }
+  return out;
+}
+
+/** Remove a whole element and its contents, to a fixed point. */
+function dropElement(input: string, name: string): string {
+  const open = new RegExp(`<${name}\\b[^>]*>`, 'i');
+  const close = new RegExp(`</${name}\\s*>`, 'i');
+  let out = input;
+  for (let guard = 0; guard < 100; guard++) {
+    const start = out.search(open);
+    if (start === -1) return out;
+    const rest = out.slice(start);
+    const m = close.exec(rest);
+    out = m ? out.slice(0, start) + rest.slice(m.index + m[0].length) : out.slice(0, start);
+  }
+  return out;
+}
+
 function stripHtml(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
+  let text = html;
+  for (let pass = 0; pass < 10; pass++) {
+    const before = text;
+    text = stripTagsOnce(dropElement(dropElement(text, 'script'), 'style'));
+    if (text === before) break;   // fixed point: nothing left to reassemble
+  }
+  return text
     // One pass, after the tags are gone. Chained replaces here decoded `&amp;`
     // BEFORE `&lt;`, so `&amp;lt;script&amp;gt;` in a shop's body_html became
     // a literal `<script>` in the stored description -- markup reconstructed
@@ -276,3 +343,7 @@ function titleFromHost(hostname: string): string {
     .map((w) => w[0]!.toUpperCase() + w.slice(1))
     .join(' ') || hostname;
 }
+
+/** Exported for tests only: both run on hostile remote HTML. */
+export const decodeEntitiesForTest = decodeEntities;
+export const stripHtmlForTest = stripHtml;
