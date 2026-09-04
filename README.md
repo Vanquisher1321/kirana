@@ -362,6 +362,48 @@ Stated here rather than discovered by a reviewer.
 
 ---
 
+## What I would build first
+
+The list above is what is missing. This is the order I would close it in, and
+the order matters more than the list.
+
+**1. Merchant consent.** Everything else here is engineering; this one is a
+product decision, and it is the only item that changes what Kirana *is*.
+Ingestion reads a feed the shop already publishes to the open web, which is
+defensible — and still not the same as a merchant agreeing to be transactable.
+No payments company can make its merchants agent-buyable without their say-so.
+In production that consent arrives through Razorpay merchant onboarding, which
+means the "no cooperation needed" property that makes the demo land is exactly
+the property that has to go. Better to design that deliberately than to discover
+it during a compliance review.
+
+**2. Refunds, disputes and chargebacks.** An agentic order that goes wrong
+currently has no way back. For a payments product that is not a missing feature,
+it is a missing half — and "the assistant bought the wrong thing" is the first
+question anyone sensible asks about agentic commerce. The guard already proves
+the shape works; a refund is the same story told backwards, and it needs the same
+audit line.
+
+**3. Storage that survives.** One SQLite file on one instance, with rate limits
+in memory that reset on restart and do not span processes. Fine for a sandbox,
+wrong the moment a second instance exists. Postgres, and limits in a shared
+store.
+
+**4. Ingestion beyond Shopify.** Thirty of forty-four tested shops work. The
+remaining routes are designed and not built, and the honest gain from each is
+written down in [COMPATIBILITY.md](COMPATIBILITY.md) rather than guessed at.
+
+**5. Real money.** Nothing here has been exercised against it. Every ceiling,
+every guard and every refusal in this repo is a claim that has only ever been
+tested in test mode, and I would not describe any of them as proven until that
+changes.
+
+UAP sits outside this list on purpose: it is not publicly specified and still
+needs RBI approval, so it is something to be ready for rather than something to
+build.
+
+---
+
 ## Licence
 
 All rights reserved. Built for the Razorpay AI Buildathon, 2026.
