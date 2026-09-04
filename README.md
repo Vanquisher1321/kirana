@@ -5,6 +5,17 @@ that shop has a machine-readable catalogue and a gated checkout that an AI agent
 can actually buy from — with no plugin, no integration, and nothing for the shop
 owner to install.
 
+**Try it now — nothing to install:** **<https://kirana-6cv8.onrender.com>**
+
+Paste any Shopify storefront (`bluetokaicoffee.com` works) and you get a live MCP
+address about eight seconds later. Hand that address to any AI assistant — in
+Claude, *Customize → Connectors → Add custom connector* — and ask it to buy
+something. It runs on Razorpay **test** credentials, so no real money can move,
+and the server refuses to start on a live key.
+
+The sandbox is a free instance: a cold visit takes about a minute to wake, and it
+re-seeds itself so nobody can leave it broken for the next person.
+
 ---
 
 ## Track 01, clause by clause
