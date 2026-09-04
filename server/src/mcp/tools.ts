@@ -143,23 +143,47 @@ export function toolSearchProducts(ctx: ToolContext, args: SearchArgs) {
     return { error: 'bad_price_filter', message: 'Price filters must be plain rupee amounts, e.g. 1500 or "1500.00".' };
   }
 
-  // One shop or many, the same search. On a buyer link each shop is searched
-  // under the caller's limit and the merged list is trimmed back to it, so a
-  // shop with a large catalogue cannot crowd the others out of the answer.
+  /**
+   * One shop or many, the same search -- but the merge across shops is
+   * round-robin, one from each in turn, not concatenate-and-trim.
+   *
+   * Every shop is searched under the caller's FULL limit, because none of them
+   * knows what the others hold. Concatenating those lists and slicing back to
+   * the limit therefore returns the first shop's hits and stops: with two shops
+   * and ten results asked for, shop one supplies all ten and shop two is
+   * invisible. A buyer with five shops connected could only ever see one of
+   * them -- which is the entire reason a buyer link exists, and it failed
+   * silently, as a shorter list of plausible products rather than an error.
+   *
+   * Taking one from each shop in turn keeps every shop's own relevance order,
+   * gives each of them a turn at the top, and still fills the limit from
+   * whoever has hits left once a shop runs out -- so a single-shop link and a
+   * link whose other shops match nothing both return exactly what they did
+   * before.
+   */
+  const limit = opts.limit ?? 10;
   const shops = reach(ctx);
   const perShop = shops.map((mid) => ({ mid, hits: searchCatalog(mid, opts) }));
+  const shopNames = new Map(shops.map((mid) => [mid, getMerchant(mid)?.name ?? mid]));
 
-  const named = perShop.flatMap(({ mid, hits }) => {
-    const m = getMerchant(mid);
-    return hits.map((pr) => ({
-      ...shapeProduct(pr),
-      // Which shop a price came from is not a detail on a multi-shop link: the
-      // agent has to name it to the human, and the quote will be settled to it.
-      merchant_id: mid,
-      shop: m?.name ?? mid,
-    }));
-  });
-  const results = named.slice(0, opts.limit ?? 10);
+  const picked: Array<{ mid: string; product: Product }> = [];
+  const deepest = perShop.reduce((n, p) => Math.max(n, p.hits.length), 0);
+  for (let rank = 0; rank < deepest && picked.length < limit; rank++) {
+    for (const { mid, hits } of perShop) {
+      const hit = hits[rank];
+      if (!hit) continue;
+      picked.push({ mid, product: hit });
+      if (picked.length >= limit) break;
+    }
+  }
+
+  const results = picked.map(({ mid, product }) => ({
+    ...shapeProduct(product),
+    // Which shop a price came from is not a detail on a multi-shop link: the
+    // agent has to name it to the human, and the quote will be settled to it.
+    merchant_id: mid,
+    shop: shopNames.get(mid) ?? mid,
+  }));
 
   record({
     actor: ctx.agentId ? `agent:${ctx.agentId}` : 'agent:anonymous',

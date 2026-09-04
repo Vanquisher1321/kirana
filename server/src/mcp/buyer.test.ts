@@ -125,6 +125,29 @@ test('search covers every shop on the link and says which one each result came f
   assert.equal(new Set(products.map((p) => p.merchant_id)).size, 2, 'results span both shops, not just the first');
 });
 
+/**
+ * The test above asks for 50 results, which is more than both shops hold
+ * together -- so nothing is ever trimmed and it passes whatever the merge does.
+ * A real assistant asks for ten. Every shop is searched under the FULL limit,
+ * so concatenating those lists and slicing back returns the first shop's hits
+ * and stops: with a limit at or below one shop's catalogue, every other shop on
+ * the link disappears, silently, as a shorter list of plausible products.
+ */
+test('a limit smaller than one shop\'s catalogue still reaches every shop', async () => {
+  const out = await callTool(anaLink, 'search_products', { limit: 2 });
+  const products = out.products as Array<{ merchant_id: string }>;
+  assert.equal(products.length, 2, 'the limit is still filled');
+  assert.equal(
+    new Set(products.map((p) => p.merchant_id)).size, 2,
+    'two results across two shops must come one from each, not both from the first',
+  );
+});
+
+test('a limit below the shop count still fills, rather than returning one per shop', async () => {
+  const out = await callTool(anaLink, 'search_products', { limit: 1 });
+  assert.equal((out.products as unknown[]).length, 1);
+});
+
 test("a buyer link cannot read another workspace's product", async () => {
   const out = await callTool(anaLink, 'get_product', { product_id: boProductId });
   assert.equal(out.error, 'product_not_found');
