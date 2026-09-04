@@ -76,8 +76,15 @@ export function buildMcpServer(merchant: Merchant, agentId: string | null, ident
  */
 export function buildBuyerMcpServer(shops: Merchant[], agentId: string | null, identityProven = false): McpServer {
   const ctx: ToolContext = { merchantId: '', shopIds: shops.map((m) => m.id), agentId, identityProven };
+  // Named, but not without limit. These names are text the shops wrote about
+  // themselves and they land in the instruction block, which is the highest-
+  // privilege position in the whole connection. Sanitised individually, capped
+  // in count, and the rest deferred to list_shops -- an assistant that needs
+  // the full set can ask for it as data instead.
+  const NAMED = 8;
   const names = shops.length
-    ? shops.map((m) => asPlainLabel(m.name, 60)).join(', ')
+    ? shops.slice(0, NAMED).map((m) => asPlainLabel(m.name, 60)).join(', ')
+      + (shops.length > NAMED ? `, and ${shops.length - NAMED} more (call list_shops)` : '')
     : 'none yet';
   return buildServer(
     ctx,
