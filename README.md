@@ -7,6 +7,42 @@ owner to install.
 
 ---
 
+## Track 01, clause by clause
+
+The bar for **AI Growth & Agentic Commerce** is one sentence:
+
+> Every money action explainable, bounded and gated. Show the audit trail and one
+> failure handled gracefully.
+
+Everything below is in this repo and running at the live sandbox. This table is
+here so you do not have to go looking.
+
+| The bar | Where it is | What you will find |
+|---|---|---|
+| **Explainable** | [`server/src/checkout/guard.ts`](server/src/checkout/guard.ts) — `authorise()` | One choke point every rupee passes through. It returns the **full check list, pass or fail** — 13 named gates, each carrying a plain-English sentence: *"The same request can never charge twice."* *"Approval is tied to one specific basket."* A guard that returned a bare boolean could not explain itself, so this one never does. |
+| **Bounded** | `guard.ts` — `agentCaps()`, `spentTodayMinor()`<br>[`checkout/standing.ts`](server/src/checkout/standing.ts) | A per-order ceiling and a rolling 24-hour ceiling on every agent. ₹2,000 / ₹10,000 for anyone who has not proven an identity, and no way to raise them from the agent side. Standing approvals add two more ceilings and a hard expiry. |
+| **Gated** | [`checkout/consent.ts`](server/src/checkout/consent.ts) | An agent may **request** approval and can never **grant** it — the two paths are separate functions and only the console reaches the second. Consent is scoped to one basket, one agent, and a clock. A kill switch stops every agent mid-flight. |
+| **Show the audit trail** | [`server/src/audit/ledger.ts`](server/src/audit/ledger.ts)<br>`GET /api/audit/verify`<br>Merchant console → **The Record** | Append-only and hash-chained: each line seals the one before it, so an edited, reordered or deleted entry is detectable rather than merely discouraged. The verify endpoint re-reads and re-hashes every row and answers whether the chain still holds. 35 distinct action types are recorded. |
+| **One failure handled gracefully** | [`server/src/razorpay/client.ts`](server/src/razorpay/client.ts) — circuit breaker<br>`checkout.deduplicated`, `checkout.blocked`, `settlement.amount_mismatch` | Four consecutive gateway failures open a breaker for 30 seconds and the next attempt is refused **before** a request is sent, with the reason named. A replayed checkout is deduplicated rather than charged twice. A settlement whose amount does not match the quote is recorded as a mismatch, not accepted. |
+| **Transactable end to end** | Live sandbox | Paste a storefront, get an MCP address, hand it to any assistant. Measured: **30 of 44** real Indian storefronts work today ([COMPATIBILITY.md](COMPATIBILITY.md)) — including 183 products and 956 buying options from Blue Tokai in about eight seconds. |
+
+Two things the bar asks for that are easy to claim and hard to prove, so here is
+the proof rather than the claim:
+
+- **The audit trail is evidence, not logging.** Hashing is length-prefixed, so no
+  value can be shifted across a field boundary while the chain still verifies.
+  Open **The Record** and the banner tells you whether the seal holds.
+- **The failure is handled where it happens, not swallowed.** Every refusal names
+  its gate and lands in the ledger, which is why the Razorpay console can show
+  *why* payments were stopped rather than only how many.
+
+Also in the repo because the submission asks for it: [ARCHITECTURE.md](ARCHITECTURE.md),
+[SECURITY.md](SECURITY.md), [COMPATIBILITY.md](COMPATIBILITY.md), and
+[FAILURES.md](FAILURES.md) — 11 write-ups of things that broke, how each was
+found, and what changed afterwards. 146 tests, 0 failing.
+
+---
+
 ## The gap this fills
 
 In February, Razorpay and NPCI launched **agentic payments on Claude** — an AI
