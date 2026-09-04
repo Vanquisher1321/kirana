@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api.ts';
+import { api, FieldError, type Delivery } from '../api.ts';
 import { Card, Empty, Load, PageHead, Pill, Skeleton, statusTone, statusWord } from '../ui.tsx';
 import { describe, timeAgo, countdown } from '../plain.ts';
 import type { PersonaProps } from '../App.tsx';
@@ -16,6 +16,63 @@ export default function ShopperView(props: PersonaProps) {
   return <Home data={data} refresh={refresh} onBlocked={onBlocked} />;
 }
 
+const EMPTY_ADDRESS: Delivery = { name: '', phone: '', line1: '', line2: '', city: '', state: '', pincode: '' };
+
+const ADDRESS_FIELDS: Array<[keyof Delivery, string, string, boolean]> = [
+  ['name', 'Full name', 'Who is receiving it', true],
+  ['phone', 'Mobile', '10 digits, for the courier', true],
+  ['line1', 'Address', 'House or flat, street', true],
+  ['line2', 'Landmark', 'Optional', false],
+  ['city', 'Town or city', '', true],
+  ['state', 'State', '', true],
+  ['pincode', 'PIN code', '6 digits', true],
+];
+
+/**
+ * Where it goes, asked on the same screen as how much.
+ *
+ * Deliberately part of the approval rather than a step of its own. Approving is
+ * one decision with two halves, and the half the assistant must never make is
+ * this one: an agent that could name the address would not need to break a cap
+ * to steal, it could have you approve a perfectly ordinary basket and quietly
+ * ship it somewhere else. So the boxes are here, in front of the person whose
+ * money it is, and nothing on the agent's side can reach them.
+ */
+function AddressForm({ value, onChange, error }: {
+  value: Delivery;
+  onChange: (d: Delivery) => void;
+  error?: { field?: string; message?: string } | null;
+}) {
+  return (
+    <div style={{ marginTop: 18 }}>
+      <div className="l" style={{ marginBottom: 8 }}>Deliver to</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+        {ADDRESS_FIELDS.map(([key, label, hint, required]) => (
+          <label key={key} style={{ display: 'grid', gap: 4, gridColumn: key === 'line1' ? '1 / -1' : undefined }}>
+            <span className="tiny" style={{ color: 'var(--ink-3)' }}>
+              {label}{required ? '' : ' (optional)'}
+            </span>
+            <input
+              className="field"
+              value={value[key]}
+              placeholder={hint}
+              aria-invalid={error?.field === key || undefined}
+              onChange={(e) => onChange({ ...value, [key]: e.target.value })}
+              style={error?.field === key ? { borderColor: 'var(--bad)' } : undefined}
+            />
+          </label>
+        ))}
+      </div>
+      {error?.message && (
+        <div className="tiny" style={{ color: 'var(--bad)', marginTop: 8 }}>{error.message}</div>
+      )}
+      <div className="tiny" style={{ color: 'var(--ink-3)', marginTop: 8 }}>
+        Saved for next time. Your assistant is never told this address.
+      </div>
+    </div>
+  );
+}
+
 const PER_ORDER_CAP_MINOR = 200000;
 const DAILY_CAP_MINOR = 1000000;
 const inr = (minor: number) => `₹${(minor / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
@@ -29,14 +86,42 @@ function spentToday(orders: { amountMinor: number; status: string; createdAt: st
 
 function Home({ data, refresh, onBlocked }: Pick<PersonaProps, 'data' | 'refresh' | 'onBlocked'>) {
   const [busy, setBusy] = useState('');
+  const [address, setAddress] = useState<Delivery>(EMPTY_ADDRESS);
+  const [addressError, setAddressError] = useState<{ field?: string; message?: string } | null>(null);
   const spent = spentToday(data.orders);
   const remaining = Math.max(0, DAILY_CAP_MINOR - spent);
   const pct = Math.min(100, (spent / DAILY_CAP_MINOR) * 100);
 
+  // Whatever they used last, so a second order is one click rather than seven
+  // fields. Read from their own session; there is no id to pass and therefore
+  // no way to point it at somebody else's address.
+  useEffect(() => {
+    void api.lastDelivery()
+      .then((r) => { if (r.delivery) setAddress(r.delivery); })
+      .catch(() => { /* an empty form is a fine fallback */ });
+  }, []);
+
   async function act(id: string, yes: boolean) {
     setBusy(id);
-    try { yes ? await api.approve(id) : await api.reject(id); await refresh(); }
-    catch { onBlocked(); } finally { setBusy(''); }
+    setAddressError(null);
+    try {
+      if (yes) await api.approve(id, address);
+      else await api.reject(id);
+      await refresh();
+    } catch (e) {
+      // The server names the field it refused, so the person can fix the one
+      // box that is wrong instead of re-reading the whole form. Taken from the
+      // response rather than guessed out of the message: the copy says "mobile"
+      // where the field is called "phone", and a heuristic on the prose gets
+      // that wrong the first time anyone rewords an error.
+      if (yes && e instanceof FieldError && e.field) {
+        setAddressError({ field: e.field, message: e.message });
+      } else if (yes && e instanceof FieldError && /address|delivery/i.test(e.message)) {
+        setAddressError({ message: e.message });
+      } else {
+        onBlocked();
+      }
+    } finally { setBusy(''); }
   }
 
   return (
@@ -153,8 +238,10 @@ function Home({ data, refresh, onBlocked }: Pick<PersonaProps, 'data' | 'refresh
             ))}
           </ul>
 
+          <AddressForm value={address} onChange={setAddress} error={addressError} />
+
           <div className="row" style={{ marginTop: 18 }}>
-            <button className="btn lg" disabled={busy === a.id} onClick={() => void act(a.id, true)}>Approve {a.capFormatted}</button>
+            <button className="btn lg" disabled={busy === a.id} onClick={() => void act(a.id, true)}>Approve {a.capFormatted} and ship here</button>
             <button className="btn lg ghost" disabled={busy === a.id} onClick={() => void act(a.id, false)}>Decline</button>
           </div>
         </div>

@@ -295,6 +295,34 @@ for (const stmt of [
   // actually standing -- had no way to show them where to pay. The approval
   // finished and the journey stopped.
   'ALTER TABLE orders ADD COLUMN pay_url TEXT',
+  /**
+   * Where the money goes, and where the goods go.
+   *
+   * Both were missing, and their absence was the same shape of gap: the system
+   * could take a payment and then answer neither "who gets paid" nor "where do
+   * I send this". A checkout that cannot answer those is a payment, not a
+   * purchase.
+   *
+   * `razorpay_account_id` is a Route linked account belonging to the merchant.
+   * Null means this shop has no payout destination and its money settles to the
+   * platform's own account, which is a real state and is shown as one rather
+   * than hidden.
+   *
+   * `delivery` is JSON, captured on the CONSENT by the human who approves and
+   * snapshotted onto the order at checkout, so a later edit of anything cannot
+   * change where an order already placed was sent.
+   */
+  'ALTER TABLE merchants ADD COLUMN razorpay_account_id TEXT',
+  'ALTER TABLE consents ADD COLUMN delivery TEXT',
+  'ALTER TABLE orders ADD COLUMN delivery TEXT',
+  // The transfer is attempted after capture and retried by the reconciler, so
+  // it needs somewhere to record both success and the reason for a failure.
+  'ALTER TABLE orders ADD COLUMN razorpay_transfer_id TEXT',
+  'ALTER TABLE orders ADD COLUMN transfer_error TEXT',
+  'CREATE INDEX IF NOT EXISTS idx_orders_transfer ON orders(status, razorpay_transfer_id)',
+  // One address, remembered for the person who typed it, so approving a second
+  // order is one click rather than seven fields. Per workspace, never shared.
+  'ALTER TABLE workspaces ADD COLUMN last_delivery TEXT',
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_merchants_public ON merchants(public_id)',
   'CREATE INDEX IF NOT EXISTS idx_merchants_ws ON merchants(workspace_id)',
   'CREATE INDEX IF NOT EXISTS idx_orders_ws ON orders(workspace_id)',

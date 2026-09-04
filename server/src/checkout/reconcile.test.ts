@@ -19,6 +19,7 @@ const { checkout, getOrder } = await import('./checkout.ts');
 const { reconcile } = await import('./reconcile.ts');
 const { resetCircuit } = await import('../razorpay/client.ts');
 const { list: auditList, verify } = await import('../audit/ledger.ts');
+import { SAMPLE_DELIVERY } from '../__fixtures__/delivery.ts';
 
 const FIXTURE = readFileSync(new URL('../adapters/__fixtures__/shopify-store.json', import.meta.url), 'utf8');
 const fixtureFetch = async (url: string | URL) => {
@@ -77,7 +78,7 @@ let n = 0;
 /** Places an order and tells the fake gateway what that order's payments look like. */
 async function placeOrder(payments: Array<Record<string, unknown>>) {
   const q = createQuote(merchantId, [{ variantId, quantity: 2 }]);
-  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 's', grantedBy: 'om' });
+  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 's', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
   const out = await checkout({
     quoteId: q.id, consentId: c.id, merchantId, agentId: null,
     idempotencyKey: `recon-${++n}`, rzpOptions: { fetchImpl: razorpay as never },

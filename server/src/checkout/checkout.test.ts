@@ -20,6 +20,7 @@ const { engageKillSwitch, releaseKillSwitch } = await import('./guard.ts');
 const { resetCircuit } = await import('../razorpay/client.ts');
 const { verify } = await import('../audit/ledger.ts');
 const { db } = await import('../lib/db.ts');
+import { SAMPLE_DELIVERY } from '../__fixtures__/delivery.ts';
 
 const FIXTURE = readFileSync(new URL('../adapters/__fixtures__/shopify-store.json', import.meta.url), 'utf8');
 const fixtureFetch = async (url: string | URL) => {
@@ -80,7 +81,7 @@ function basket(qty = 2) {
 
 test('happy path: guarded, charged, audited', async () => {
   const q = basket();                       // ₹998.00
-  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 100000, scope: 'bluehill-example', grantedBy: 'om' });
+  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 100000, scope: 'bluehill-example', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
   const out = await checkout({
     quoteId: q.id, consentId: c.id, merchantId, agentId: null,
     idempotencyKey: 'idem-happy-1', rzpOptions: { fetchImpl: okRazorpay as never },
@@ -97,7 +98,7 @@ test('happy path: guarded, charged, audited', async () => {
 
 test('a quote and its approval are single use', async () => {
   const q = basket();
-  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 100000, scope: 's', grantedBy: 'om' });
+  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 100000, scope: 's', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
   const first = await checkout({ quoteId: q.id, consentId: c.id, merchantId, agentId: null, idempotencyKey: 'idem-once-1', rzpOptions: { fetchImpl: okRazorpay as never } });
   assert.equal(first.ok, true);
   const replay = await checkout({ quoteId: q.id, consentId: c.id, merchantId, agentId: null, idempotencyKey: 'idem-once-2', rzpOptions: { fetchImpl: okRazorpay as never } });
@@ -107,7 +108,7 @@ test('a quote and its approval are single use', async () => {
 
 test('THE CAP: an agent cannot spend above what the human approved', async () => {
   const q = basket();                       // ₹998.00
-  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 50000, scope: 's', grantedBy: 'om' }); // ₹500.00
+  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 50000, scope: 's', grantedBy: 'om', delivery: SAMPLE_DELIVERY }); // ₹500.00
   const out = await checkout({ quoteId: q.id, consentId: c.id, merchantId, agentId: null, idempotencyKey: 'idem-cap', rzpOptions: { fetchImpl: okRazorpay as never } });
   assert.equal(out.ok, false);
   assert.equal(out.blockedBy, 'within_consent_cap');
@@ -117,7 +118,7 @@ test('THE CAP: an agent cannot spend above what the human approved', async () =>
 
 test('revoking approval stops a payment that was about to happen', async () => {
   const q = basket();
-  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 100000, scope: 's', grantedBy: 'om' });
+  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 100000, scope: 's', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
   revokeConsent(c.id, 'om');
   const out = await checkout({ quoteId: q.id, consentId: c.id, merchantId, agentId: null, idempotencyKey: 'idem-revoke', rzpOptions: { fetchImpl: okRazorpay as never } });
   assert.equal(out.ok, false);
@@ -128,7 +129,7 @@ test('revoking approval stops a payment that was about to happen', async () => {
 
 test('approval given to one agent cannot be used by another', async () => {
   const q = basket();
-  const c = grantConsent({ quoteId: q.id, agentId: 'agent_alpha', capMinor: 100000, scope: 's', grantedBy: 'om' });
+  const c = grantConsent({ quoteId: q.id, agentId: 'agent_alpha', capMinor: 100000, scope: 's', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
   const out = await checkout({ quoteId: q.id, consentId: c.id, merchantId, agentId: 'agent_beta', idempotencyKey: 'idem-agent', rzpOptions: { fetchImpl: okRazorpay as never } });
   assert.equal(out.ok, false);
   assert.equal(out.blockedBy, 'consent_agent_match');
@@ -138,7 +139,7 @@ test('approval given to one agent cannot be used by another', async () => {
 test('approval for one basket cannot pay for a different basket', async () => {
   const qA = basket(1);
   const qB = basket(2);
-  const c = grantConsent({ quoteId: qA.id, agentId: null, capMinor: 500000, scope: 's', grantedBy: 'om' });
+  const c = grantConsent({ quoteId: qA.id, agentId: null, capMinor: 500000, scope: 's', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
   const out = await checkout({ quoteId: qB.id, consentId: c.id, merchantId, agentId: null, idempotencyKey: 'idem-swap', rzpOptions: { fetchImpl: okRazorpay as never } });
   assert.equal(out.ok, false);
   assert.equal(out.blockedBy, 'consent_quote_match');
@@ -146,13 +147,13 @@ test('approval for one basket cannot pay for a different basket', async () => {
 
 test('THE DOUBLE CHARGE: the same idempotency key never charges twice', async () => {
   const q1 = basket();
-  const c1 = grantConsent({ quoteId: q1.id, agentId: null, capMinor: 100000, scope: 's', grantedBy: 'om' });
+  const c1 = grantConsent({ quoteId: q1.id, agentId: null, capMinor: 100000, scope: 's', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
   const a = await checkout({ quoteId: q1.id, consentId: c1.id, merchantId, agentId: null, idempotencyKey: 'idem-dupe', rzpOptions: { fetchImpl: okRazorpay as never } });
   assert.equal(a.ok, true);
   const callsAfterFirst = rzpCalls.length;
 
   const q2 = basket();
-  const c2 = grantConsent({ quoteId: q2.id, agentId: null, capMinor: 100000, scope: 's', grantedBy: 'om' });
+  const c2 = grantConsent({ quoteId: q2.id, agentId: null, capMinor: 100000, scope: 's', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
   const b = await checkout({ quoteId: q2.id, consentId: c2.id, merchantId, agentId: null, idempotencyKey: 'idem-dupe', rzpOptions: { fetchImpl: okRazorpay as never } });
   assert.equal(b.ok, false);
   assert.equal(b.blockedBy, 'idempotency');
@@ -162,7 +163,7 @@ test('THE DOUBLE CHARGE: the same idempotency key never charges twice', async ()
 
 test('price drift after approval blocks the charge before any money moves', async () => {
   const q = basket();
-  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 's', grantedBy: 'om' });
+  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 's', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
   db.prepare('UPDATE variants SET price_minor = 59900 WHERE id = ?').run(cheapVariant);
   const out = await checkout({ quoteId: q.id, consentId: c.id, merchantId, agentId: null, idempotencyKey: 'idem-drift', rzpOptions: { fetchImpl: okRazorpay as never } });
   assert.equal(out.ok, false);
@@ -174,7 +175,7 @@ test('price drift after approval blocks the charge before any money moves', asyn
 
 test('the kill switch stops everything instantly', async () => {
   const q = basket();
-  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 's', grantedBy: 'om' });
+  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 's', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
   engageKillSwitch('demo: operator pulled the cord');
   const out = await checkout({ quoteId: q.id, consentId: c.id, merchantId, agentId: null, idempotencyKey: 'idem-kill', rzpOptions: { fetchImpl: okRazorpay as never } });
   assert.equal(out.ok, false);
@@ -185,7 +186,7 @@ test('the kill switch stops everything instantly', async () => {
 
 test('GRACEFUL FAILURE: a gateway outage records a failed order and charges nothing', async () => {
   const q = basket();
-  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 's', grantedBy: 'om' });
+  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 's', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
   const out = await checkout({
     quoteId: q.id, consentId: c.id, merchantId, agentId: null, idempotencyKey: 'idem-outage',
     rzpOptions: { fetchImpl: failingRazorpay as never, attempts: 2 },
@@ -201,7 +202,7 @@ test('GRACEFUL FAILURE: a gateway outage records a failed order and charges noth
 
 test('webhook settlement marks the order paid and is auditable', async () => {
   const q = basket();
-  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 's', grantedBy: 'om' });
+  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 's', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
   const out = await checkout({ quoteId: q.id, consentId: c.id, merchantId, agentId: null, idempotencyKey: 'idem-settle', rzpOptions: { fetchImpl: okRazorpay as never } });
   assert.equal(out.ok, true);
   // Settle the order this test actually created, not whichever row happens to
@@ -245,7 +246,7 @@ test('the audit chain still verifies after every one of those decisions', () => 
 
 test('RACE: one approval cannot fund two orders, however many callers overlap', async () => {
   const q = basket();                       // ₹998.00
-  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 'bluehill-example', grantedBy: 'om' });
+  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 'bluehill-example', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
 
   // Ten simultaneous calls, each with its OWN idempotency key -- which is what
   // the MCP tool mints whenever an agent omits one, so this is the default
@@ -280,7 +281,7 @@ test('RACE: one approval cannot fund two orders, however many callers overlap', 
 
 test('RACE: the same idempotency key still collapses to one order', async () => {
   const q = basket();
-  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 'bluehill-example', grantedBy: 'om' });
+  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 'bluehill-example', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
   const results = await Promise.all(
     Array.from({ length: 5 }, () =>
       checkout({
@@ -294,7 +295,7 @@ test('RACE: the same idempotency key still collapses to one order', async () => 
 
 test('a definite gateway refusal hands the approval back, so the human need not approve twice', async () => {
   const q = basket();
-  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 'bluehill-example', grantedBy: 'om' });
+  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 'bluehill-example', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
 
   // 400 is a definite answer: Razorpay saw the request and refused it, so
   // nothing was created and the quote is safe to reuse.
@@ -319,7 +320,7 @@ test('a definite gateway refusal hands the approval back, so the human need not 
 
 test('an AMBIGUOUS gateway failure keeps the approval burned', async () => {
   const q = basket();
-  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 'bluehill-example', grantedBy: 'om' });
+  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 'bluehill-example', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
 
   // A 502 may or may not have created something at Razorpay. Handing the quote
   // back here is how one approval quietly becomes two payable links, so the

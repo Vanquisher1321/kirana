@@ -229,14 +229,35 @@ export function authorise(input: GuardInput): GuardResult {
       : 'A different agent tried to use this approval.');
   }
 
-  // 6. THE cap check. The agent cannot spend more than the human allowed.
+  /**
+   * 6. A destination, given by the human, not by the agent.
+   *
+   * Every other gate in this list bounds how MUCH is spent. None of them bounds
+   * where the goods land, and an agent that could name the address would not
+   * need to break a cap to steal: a perfectly ordinary basket, approved by a
+   * person who read it carefully, shipped somewhere they never saw. So the
+   * destination is carried on the consent -- put there by the console, from the
+   * person whose money it is -- and a charge cannot pass without one.
+   *
+   * It is also the difference between a payment and a purchase. Taking money
+   * for physical goods with nowhere to send them leaves the merchant paid and
+   * unable to fulfil, which is a worse outcome for them than a refusal.
+   */
+  const hasDelivery = Boolean(c.delivery && c.delivery.pincode && c.delivery.line1);
+  if (!add('delivery_known', 'The buyer said where it goes, and the agent cannot change that.', hasDelivery,
+    hasDelivery ? `To ${c.delivery!.city} ${c.delivery!.pincode}` : 'No delivery address on this approval')) {
+    return fail('delivery_known',
+      'This approval carries no delivery address, so nothing was charged. The buyer supplies one when they approve.');
+  }
+
+  // 7. THE cap check. The agent cannot spend more than the human allowed.
   if (!add('within_consent_cap', 'The charge cannot exceed the approved cap.', quote.totalMinor <= c.capMinor,
     `${formatInr(quote.totalMinor)} against a cap of ${formatInr(c.capMinor)}`)) {
     return fail('within_consent_cap',
       `The basket totals ${formatInr(quote.totalMinor)} but the approved cap is ${formatInr(c.capMinor)}. No payment was attempted.`);
   }
 
-  // 7. Platform caps, independent of what any human approved.
+  // 8. Platform caps, independent of what any human approved.
   const caps = agentCaps(input.identityProven ? input.agentId : null);
   if (!add('within_per_order_cap', 'Every agent has a hard per-order ceiling.', quote.totalMinor <= caps.perOrder,
     `${formatInr(quote.totalMinor)} against ${formatInr(caps.perOrder)} for ${caps.label}`)) {

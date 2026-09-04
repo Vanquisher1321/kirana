@@ -25,6 +25,7 @@ const { createQuote } = await import('./checkout/quote.ts');
 const { grantConsent } = await import('./checkout/consent.ts');
 const { checkout, getOrder } = await import('./checkout/checkout.ts');
 const { list: auditList, verify } = await import('./audit/ledger.ts');
+import { SAMPLE_DELIVERY } from './__fixtures__/delivery.ts';
 
 const SECRET = 'whsec_test_kirana';
 const FIXTURE = readFileSync(new URL('./adapters/__fixtures__/shopify-store.json', import.meta.url), 'utf8');
@@ -73,7 +74,7 @@ before(async () => {
   const attikan = searchCatalog(merchantId, { query: 'attikan' })[0]!;
   const variant = attikan.variants.find((v) => v.priceMinor === 49900)!;
   const q = createQuote(merchantId, [{ variantId: variant.id, quantity: 2 }]);
-  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 's', grantedBy: 'om' });
+  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 's', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
   const out = await checkout({
     quoteId: q.id, consentId: c.id, merchantId, agentId: null,
     idempotencyKey: 'wh-1', rzpOptions: { fetchImpl: okRazorpay as never },
@@ -161,7 +162,7 @@ test('a late failure cannot erase a mismatch that is waiting for a human', async
   const attikan = searchCatalog(merchantId, { query: 'attikan' })[0]!;
   const variant = attikan.variants.find((v) => v.priceMinor === 49900)!;
   const q = createQuote(merchantId, [{ variantId: variant.id, quantity: 2 }]);
-  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 's', grantedBy: 'om' });
+  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 's', grantedBy: 'om', delivery: SAMPLE_DELIVERY });
   const out = await checkout({
     quoteId: q.id, consentId: c.id, merchantId, agentId: null,
     idempotencyKey: 'wh-2', rzpOptions: { fetchImpl: rzpTwo as never },

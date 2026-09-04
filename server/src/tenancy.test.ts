@@ -30,6 +30,7 @@ const { getMerchant, searchCatalog } = await import('./catalog/store.ts');
 const { createQuote } = await import('./checkout/quote.ts');
 const { requestConsent } = await import('./checkout/consent.ts');
 import type { FastifyInstance } from 'fastify';
+import { SAMPLE_DELIVERY } from './__fixtures__/delivery.ts';
 
 const FIXTURE = readFileSync(new URL('./adapters/__fixtures__/shopify-store.json', import.meta.url), 'utf8');
 const fixtureFetch = async (url: string | URL) => {
@@ -262,7 +263,9 @@ test("DEMO: a visitor can approve against the instance's own seeded shop", async
   const queue = await (await visitor.fetch('/api/approvals')).json() as Array<{ id: string }>;
   assert.ok(queue.some((c) => c.id === pending.id), 'the shared demo queue is visible to a visitor');
 
-  const res = await visitor.fetch(`/api/approvals/${pending.id}/approve`, { method: 'POST', body: '{}' });
+  const res = await visitor.fetch(`/api/approvals/${pending.id}/approve`, {
+    method: 'POST', body: JSON.stringify({ delivery: SAMPLE_DELIVERY }),
+  });
   assert.equal(res.status, 200, 'and they can actually say yes');
   assert.equal((await res.json() as { status: string }).status, 'granted');
 });
@@ -319,4 +322,95 @@ test('SECURITY: the public shop directory does not publish anyone\u2019s session
     await (await stranger.fetch('/api/audit?limit=200')).text(),
   ].join('');
   assert.equal(everywhere.includes(aliceWs), false, 'no console route leaks another visitor\u2019s session');
+});
+
+/**
+ * A payout destination is the one shop-shaped thing that is never shared.
+ *
+ * Every other route that hangs off a shop uses `ownsViaShop`, which treats an
+ * unowned shop -- the instance's own seeded one -- as everybody's. That is
+ * right for an approval queue on a sandbox strangers share, and it would be
+ * catastrophic here: it would let any visitor point the demo shop's takings at
+ * an account of their own, and the ledger would faithfully record every rupee
+ * going to them.
+ */
+test('TENANCY: one visitor cannot redirect another visitor\u2019s money', async () => {
+  const res = await mallory.fetch(`/api/merchants/${aliceOrderMerchant}/payout`, {
+    method: 'POST', body: JSON.stringify({ accountId: 'acc_MALLORYSOWN123' }),
+  });
+  assert.equal(res.status, 404, "another tenant's payout account is not addressable");
+
+  const alicesView = await (await alice.fetch('/api/merchants')).json() as Array<{ id: string; payoutConfigured: boolean }>;
+  const shop = alicesView.find((m) => m.id === aliceOrderMerchant)!;
+  assert.equal(shop.payoutConfigured, false, 'and nothing was set');
+});
+
+test('TENANCY: the shared demo shop\u2019s takings cannot be claimed by a visitor', async () => {
+  const seeded = await ingestStorefront('payout-demo-shop.example', { fetchImpl: fixtureFetch as never });
+  const merchant = getMerchant(seeded.merchantId)!;
+  assert.equal(merchant.workspaceId ?? null, null, 'a boot-seeded shop is owned by nobody');
+
+  const visitor = new Visitor();
+  await visitor.role('merchant');
+  const res = await visitor.fetch(`/api/merchants/${merchant.id}/payout`, {
+    method: 'POST', body: JSON.stringify({ accountId: 'acc_OPPORTUNIST99' }),
+  });
+  assert.equal(res.status, 404, 'shared for approving is not shared for being paid');
+  assert.equal(getMerchant(merchant.id)!.razorpayAccountId, null);
+});
+
+test('a payout account that is not shaped like one is refused', async () => {
+  // Alice's own shop, connected in `before`. Ingesting another one here would
+  // be the eleventh call from this address in a minute, and the ingest limiter
+  // would refuse it -- a test that fails for a reason it is not about.
+  const merchant = { id: aliceOrderMerchant };
+
+  const bad = await alice.fetch(`/api/merchants/${merchant.id}/payout`, {
+    method: 'POST', body: JSON.stringify({ accountId: 'my-bank-account' }),
+  });
+  assert.equal(bad.status, 400);
+  assert.equal((await bad.json() as { error: string }).error, 'bad_account');
+
+  const good = await alice.fetch(`/api/merchants/${merchant.id}/payout`, {
+    method: 'POST', body: JSON.stringify({ accountId: 'acc_ALICELINKED123' }),
+  });
+  assert.equal(good.status, 200);
+  assert.equal(getMerchant(merchant.id)!.razorpayAccountId, 'acc_ALICELINKED123');
+
+  // Clearing it is how a merchant stops us paying an account that is no longer
+  // theirs, so it has to be expressible.
+  const cleared = await alice.fetch(`/api/merchants/${merchant.id}/payout`, {
+    method: 'POST', body: JSON.stringify({ accountId: '' }),
+  });
+  assert.equal(cleared.status, 200);
+  assert.equal(getMerchant(merchant.id)!.razorpayAccountId, null);
+});
+
+test('TENANCY: a delivery address is not readable by a bystander on a shared shop', async () => {
+  // The demo shop is unowned, so `ownsViaShop` says every visitor may act on
+  // its approvals -- which is the point of a shared sandbox. An address must
+  // not inherit that: the field asks a narrower question than the route it
+  // rides on, or the shared queue becomes a directory of strangers' streets.
+  const seeded = await ingestStorefront('bystander-shop.example', { fetchImpl: fixtureFetch as never });
+  const merchant = getMerchant(seeded.merchantId)!;
+  const product = searchCatalog(merchant.id, { limit: 1 })[0]!;
+  const quote = createQuote(merchant.id, [{ variantId: product.variants[0]!.id, quantity: 1 }], null);
+
+  const buyer = new Visitor();
+  await buyer.role('shopper');
+  const pending = requestConsent({
+    quoteId: quote.id, agentId: null, capMinor: 500000, scope: merchant.id,
+  });
+  const approved = await buyer.fetch(`/api/approvals/${pending.id}/approve`, {
+    method: 'POST', body: JSON.stringify({ delivery: SAMPLE_DELIVERY }),
+  });
+  assert.equal(approved.status, 200, 'the buyer can approve on the shared shop');
+
+  // The buyer sees their own.
+  const mine = await (await buyer.fetch('/api/orders')).text();
+  const bystander = await (await new Visitor().fetch('/api/orders')).text();
+  for (const secret of [SAMPLE_DELIVERY.line1, SAMPLE_DELIVERY.phone, SAMPLE_DELIVERY.name]) {
+    assert.equal(bystander.includes(secret), false, `a bystander read ${secret}`);
+  }
+  assert.ok(mine.length > 0);
 });

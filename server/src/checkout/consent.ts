@@ -3,6 +3,8 @@ import { id } from '../lib/id.ts';
 import { record } from '../audit/ledger.ts';
 import { ensureAgent } from './agents.ts';
 import { matchStandingRule } from './standing.ts';
+import { readDelivery, deliveryRef, type Delivery } from './delivery.ts';
+import { lastDelivery, rememberDelivery } from '../lib/workspace.ts';
 
 /**
  * Consent, shaped after UPI Reserve Pay: a human pre-authorises a CAP for a
@@ -26,6 +28,11 @@ export interface Consent {
   grantedAt: string;
   expiresAt: string;
   revokedAt: string | null;
+  /**
+   * Where the goods go, given by the same human at the same moment as the cap.
+   * Null until they answer -- and the guard will not let a charge past a null.
+   */
+  delivery: Delivery | null;
   status: 'pending' | 'granted' | 'consumed' | 'revoked' | 'expired' | 'rejected';
 }
 
@@ -76,6 +83,7 @@ export function requestConsent(input: {
     grantedAt: '',
     expiresAt: new Date(now + (input.ttlMs ?? DEFAULT_CONSENT_TTL_MS)).toISOString(),
     revokedAt: null,
+    delivery: null,
     status: 'pending',
   };
   /**
@@ -95,17 +103,31 @@ export function requestConsent(input: {
     capMinor: consent.capMinor,
   });
 
-  if (match) {
+  /**
+   * A standing rule still has to say WHERE.
+   *
+   * The rule is the human's answer given in advance, and an answer that names a
+   * ceiling but no destination is half of one -- there would be nobody to ask
+   * at capture time, and the order would settle with nowhere to ship. So an
+   * auto-grant uses the address that person has already saved, and if they have
+   * never saved one the rule simply does not fire and the request waits for a
+   * human. That is the same fallback every other unmet condition here takes:
+   * a reason to refuse is a reason to ask, never a reason to fail.
+   */
+  const standingDelivery = match ? lastDelivery(match.rule.workspaceId ?? input.buyerWorkspaceId ?? null) : null;
+
+  if (match && standingDelivery) {
     consent.status = 'granted';
+    consent.delivery = readDelivery(standingDelivery);
     consent.grantedBy = match.rule.createdBy;
     consent.grantedAt = new Date(now).toISOString();
     db.prepare(
-      `INSERT INTO consents (id, quote_id, agent_id, cap_minor, scope, granted_by, granted_at, expires_at, revoked_at, status, standing_rule_id, buyer_workspace_id)
-       VALUES (?,?,?,?,?,?,?,?,NULL,'granted',?,?)`,
+      `INSERT INTO consents (id, quote_id, agent_id, cap_minor, scope, granted_by, granted_at, expires_at, revoked_at, status, standing_rule_id, buyer_workspace_id, delivery)
+       VALUES (?,?,?,?,?,?,?,?,NULL,'granted',?,?,?)`,
     ).run(
       consent.id, consent.quoteId, consent.agentId, consent.capMinor, consent.scope,
       consent.grantedBy, consent.grantedAt, consent.expiresAt, match.rule.id,
-      input.buyerWorkspaceId ?? null,
+      input.buyerWorkspaceId ?? null, standingDelivery,
     );
 
     // Its own action, never plain `consent.granted`. Someone reading The Record
@@ -120,6 +142,7 @@ export function requestConsent(input: {
         quoteId: consent.quoteId, capMinor: consent.capMinor, scope: consent.scope,
         expiresAt: consent.expiresAt, agentId: consent.agentId,
         standingRuleId: match.rule.id,
+        deliverTo: consent.delivery ? deliveryRef(consent.delivery) : null,
         perOrderCapMinor: match.rule.perOrderCapMinor,
         dailyHeadroomBeforeMinor: match.headroomMinor,
         ruleExpiresAt: match.rule.expiresAt,
@@ -144,13 +167,33 @@ export function requestConsent(input: {
   return consent;
 }
 
-/** Human-only. Turns a pending request into a live approval. */
-export function approveConsent(consentId: string, by: string, buyerWorkspaceId: string | null = null): Consent {
+/**
+ * Human-only. Turns a pending request into a live approval.
+ *
+ * The address is taken here rather than anywhere earlier because this is the
+ * only moment a PERSON is present. Approving is one decision with two halves --
+ * how much, and where to -- and splitting them would mean a system that can be
+ * told to spend by a human and told where to ship by something else.
+ */
+export function approveConsent(
+  consentId: string,
+  by: string,
+  buyerWorkspaceId: string | null = null,
+  delivery: Delivery | null = null,
+): Consent {
   const c = getConsent(consentId);
   if (!c) throw new ConsentError('not_found', `No approval request ${consentId}.`);
   if (c.status !== 'pending') throw new ConsentError('not_pending', `Request is already ${c.status}.`);
   const at = nowIso();
   db.prepare("UPDATE consents SET status='granted', granted_by=?, granted_at=? WHERE id=?").run(by, at, consentId);
+  if (delivery) {
+    const json = JSON.stringify(delivery);
+    db.prepare('UPDATE consents SET delivery = ? WHERE id = ?').run(json, consentId);
+    // Saved for next time, and for any standing rule this person has set up --
+    // both of which are the same act of not asking someone the same seven
+    // questions twice.
+    if (buyerWorkspaceId) rememberDelivery(buyerWorkspaceId, json);
+  }
   // The person who approved the spend is the buyer, and on a per-shop link this
   // is the only moment anyone learns that. Without it their own purchase is
   // invisible to them the moment the shop belongs to somebody else -- or to
@@ -161,7 +204,11 @@ export function approveConsent(consentId: string, by: string, buyerWorkspaceId: 
   }
   record({
     actor: `human:${by}`, action: 'consent.granted', subjectId: consentId, outcome: 'ok',
-    detail: { quoteId: c.quoteId, capMinor: c.capMinor, scope: c.scope, expiresAt: c.expiresAt, agentId: c.agentId },
+    detail: {
+      quoteId: c.quoteId, capMinor: c.capMinor, scope: c.scope, expiresAt: c.expiresAt, agentId: c.agentId,
+      // Enough to recognise the destination in a support call, never the street.
+      deliverTo: delivery ? deliveryRef(delivery) : null,
+    },
   });
   return getConsent(consentId)!;
 }
@@ -215,12 +262,23 @@ export function consentWorkspace(consentId: string): string | null {
   return (r?.ws as string | null) ?? null;
 }
 
+/**
+ * A grant made directly, without a pending request in front of it.
+ *
+ * `delivery` is REQUIRED rather than optional, so that adding the destination
+ * to this system could not quietly leave a path that still creates spendable
+ * approvals with nowhere to ship. Making it optional would have compiled on the
+ * first try and left every existing caller producing exactly the state the new
+ * guard exists to refuse; making it required turned the compiler into the list
+ * of places that had to think about it.
+ */
 export function grantConsent(input: {
   quoteId: string;
   agentId: string | null;
   capMinor: number;
   scope: string;
   grantedBy: string;
+  delivery: Delivery;
   ttlMs?: number;
 }): Consent {
   if (!Number.isSafeInteger(input.capMinor) || input.capMinor <= 0) {
@@ -239,20 +297,26 @@ export function grantConsent(input: {
     grantedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + (input.ttlMs ?? DEFAULT_CONSENT_TTL_MS)).toISOString(),
     revokedAt: null,
+    delivery: input.delivery,
     status: 'granted',
   };
 
   db.prepare(
-    `INSERT INTO consents (id, quote_id, agent_id, cap_minor, scope, granted_by, granted_at, expires_at, revoked_at, status)
-     VALUES (?,?,?,?,?,?,?,?,NULL,'granted')`,
-  ).run(consent.id, consent.quoteId, consent.agentId, consent.capMinor, consent.scope, consent.grantedBy, consent.grantedAt, consent.expiresAt);
+    `INSERT INTO consents (id, quote_id, agent_id, cap_minor, scope, granted_by, granted_at, expires_at, revoked_at, status, delivery)
+     VALUES (?,?,?,?,?,?,?,?,NULL,'granted',?)`,
+  ).run(consent.id, consent.quoteId, consent.agentId, consent.capMinor, consent.scope, consent.grantedBy, consent.grantedAt, consent.expiresAt,
+    JSON.stringify(input.delivery));
 
   record({
     actor: `human:${input.grantedBy}`,
     action: 'consent.granted',
     subjectId: consent.id,
     outcome: 'ok',
-    detail: { quoteId: consent.quoteId, capMinor: consent.capMinor, scope: consent.scope, expiresAt: consent.expiresAt, agentId: consent.agentId },
+    detail: {
+      quoteId: consent.quoteId, capMinor: consent.capMinor, scope: consent.scope,
+      expiresAt: consent.expiresAt, agentId: consent.agentId,
+      deliverTo: deliveryRef(input.delivery),
+    },
   });
 
   return consent;
@@ -265,6 +329,7 @@ function rowToConsent(r: Record<string, unknown>): Consent {
     capMinor: Number(r.cap_minor), scope: String(r.scope),
     grantedBy: String(r.granted_by), grantedAt: String(r.granted_at),
     expiresAt: String(r.expires_at), revokedAt: (r.revoked_at as string | null) ?? null,
+    delivery: readDelivery(r.delivery),
     status: r.status as Consent['status'],
   };
 }

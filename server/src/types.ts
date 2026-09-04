@@ -21,6 +21,13 @@ export interface Merchant {
   platform: Platform;
   currency: string;
   ingestedAt: string;
+  /**
+   * The merchant's Razorpay Route linked account, where this shop's takings are
+   * transferred after capture. Null means there is nowhere to send them yet and
+   * the money stays in the platform's account — a real state, and one the
+   * console names rather than hides.
+   */
+  razorpayAccountId: string | null;
   /** Free-text policies surfaced to buyer agents so they can answer questions without guessing. */
   policies: MerchantPolicies;
 }
@@ -66,10 +73,12 @@ export interface Variant {
  * What an adapter returns before it is persisted.
  *
  * Identity and tenancy are assigned at persistence, not by the adapter — an
- * adapter reads a shop, it does not decide who owns the result.
+ * adapter reads a shop, it does not decide who owns the result. A payout
+ * account is the same kind of fact and arrives the same way: a person sets it
+ * from the console, and no amount of reading a storefront can establish it.
  */
 export interface IngestResult {
-  merchant: Omit<Merchant, 'id' | 'ingestedAt' | 'publicId' | 'workspaceId'>;
+  merchant: Omit<Merchant, 'id' | 'ingestedAt' | 'publicId' | 'workspaceId' | 'razorpayAccountId'>;
   products: Array<Omit<Product, 'id' | 'merchantId' | 'variants'> & {
     variants: Array<Omit<Variant, 'id' | 'productId'>>;
   }>;

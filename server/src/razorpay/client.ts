@@ -201,6 +201,53 @@ export function createPaymentLink(input: {
   return call<RzpPaymentLink>('/payment_links', { ...opts, method: 'POST', body });
 }
 
+export interface RzpTransfer {
+  id: string; entity?: string; source?: string; recipient?: string;
+  amount: number; currency: string; status?: string;
+  error?: { code?: string; description?: string } | null;
+}
+
+/**
+ * Route: move a captured payment on to the merchant's linked account.
+ *
+ * Deliberately AFTER capture, against the payment id, rather than as a
+ * `transfers` array on the order we create at checkout. Two reasons, and the
+ * first is this project's oldest scar.
+ *
+ * A Razorpay Order and a Payment Link are different objects, and our customers
+ * pay the LINK -- which is why reconciliation had to learn to look at the link
+ * first. Transfers attached to the order we create would hang off the object
+ * the money does not arrive on. Splitting at capture time sidesteps the whole
+ * distinction: whatever route the money took, `settleOrder` ends up holding the
+ * payment id that actually received it.
+ *
+ * Second, it is retryable. A transfer that fails leaves a captured payment and
+ * an order that plainly says the money has not been passed on yet, and the
+ * reconciler tries again. A split declared at order creation either happens or
+ * silently does not.
+ *
+ * Shape is per Razorpay's "Create Transfers from Payments":
+ *   POST /payments/{id}/transfers  { transfers: [{ account, amount, currency }] }
+ * Note `account`, not `account_id` -- the linked-account docs use both spellings
+ * for different endpoints and this is the one this call wants.
+ */
+export function createTransfer(paymentId: string, input: {
+  account: string; amountMinor: number; currency: string; notes?: Record<string, string>;
+}, opts: CallOptions = {}): Promise<{ items?: RzpTransfer[] }> {
+  return call<{ items?: RzpTransfer[] }>(`/payments/${paymentId}/transfers`, {
+    ...opts,
+    method: 'POST',
+    body: {
+      transfers: [{
+        account: input.account,
+        amount: input.amountMinor,
+        currency: input.currency,
+        notes: input.notes ?? {},
+      }],
+    },
+  });
+}
+
 export function fetchPayment(paymentId: string, opts: CallOptions = {}): Promise<RzpPayment> {
   return call<RzpPayment>(`/payments/${paymentId}`, opts);
 }

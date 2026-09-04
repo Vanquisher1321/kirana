@@ -2,12 +2,13 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastif
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { config } from './lib/config.ts';
 import { ingestStorefront, IngestError } from './catalog/ingest.ts';
-import { getMerchant, getMerchantForMcp, listMerchants, latestRun, searchCatalog } from './catalog/store.ts';
+import { getMerchant, getMerchantForMcp, listMerchants, latestRun, searchCatalog, setMerchantPayout } from './catalog/store.ts';
 import { buildMcpServer, buildBuyerMcpServer } from './mcp/server.ts';
 import { list as auditList, verify as auditVerify, forSubject, record, workspaceRef } from './audit/ledger.ts';
 import { formatInr } from './lib/money.ts';
 import { listPendingConsents, approveConsent, rejectConsent, revokeConsent, getConsent, consentWorkspace, ConsentError } from './checkout/consent.ts';
 import { getQuote } from './checkout/quote.ts';
+import { parseDelivery, readDelivery, DeliveryError } from './checkout/delivery.ts';
 import { listOrders, getOrder, orderWorkspace, settleOrder } from './checkout/checkout.ts';
 import { reconcile } from './checkout/reconcile.ts';
 import { listAgents, getAgent, setAgentCaps, issueAgentKey, agentForKey, agentWorkspace, ensureAgent } from './checkout/agents.ts';
@@ -18,7 +19,7 @@ import {
 } from './checkout/standing.ts';
 import { KILL_SWITCH, engageKillSwitch, releaseKillSwitch, killSwitchActive } from './checkout/guard.ts';
 import { enforceMerchantCap } from './lib/selfheal.ts';
-import { COOKIE, ROLES, cookieHeader, createWorkspace, ensureBuyerKey, getWorkspace, readCookie, rotateBuyerKey, setFullAccess, setWorkspaceRole, touchWorkspace, workspaceForBuyerKey, type Role } from './lib/workspace.ts';
+import { COOKIE, ROLES, cookieHeader, createWorkspace, ensureBuyerKey, getWorkspace, lastDelivery, readCookie, rotateBuyerKey, setFullAccess, setWorkspaceRole, touchWorkspace, workspaceForBuyerKey, type Role } from './lib/workspace.ts';
 import { circuitState } from './razorpay/client.ts';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -315,6 +316,26 @@ export function buildApp(): FastifyInstance {
   ): boolean => (ownerWorkspace === null ? true : owns(request, ownerWorkspace));
 
   /**
+   * May this caller read the delivery address on this order?
+   *
+   * Deliberately not `ownsViaShop`: an unowned shop is shared, an address never
+   * is. The seller needs it to fulfil and the buyer gave it; the operator holds
+   * the deploy secret and can already read everything. Everyone else gets null,
+   * including a visitor legitimately looking at a shared demo shop's order.
+   */
+  const maySeeDelivery = (
+    request: { workspaceId?: string; operator?: boolean },
+    order: Record<string, unknown>,
+  ): boolean => {
+    if (request.operator === true) return true;
+    const me = ws(request);
+    if (!me) return false;
+    const seller = orderWorkspace(String(order.id));
+    const buyer = (order.buyer_workspace_id as string | null) ?? null;
+    return me === seller || me === buyer;
+  };
+
+  /**
    * Who approved this, for the audit trail.
    *
    * The caller used to be able to name themselves, and both the console and the
@@ -471,6 +492,7 @@ export function buildApp(): FastifyInstance {
   const publicMerchant = (m: {
     id: string; slug: string; name: string; originUrl: string; publicId?: string | null;
     platform: string; currency: string; policies: unknown; ingestedAt: string;
+    razorpayAccountId?: string | null;
   }) => {
     const run = latestRun(m.id);
     return {
@@ -483,6 +505,13 @@ export function buildApp(): FastifyInstance {
       currency: m.currency,
       policies: m.policies,
       ingestedAt: m.ingestedAt,
+      /**
+       * Whether this shop has somewhere of its own to be paid -- a boolean, not
+       * the account id. The id is not a credential, but it is the merchant's
+       * banking identity and the shop directory is public; "are they set up"
+       * is the question a reader has, and it is the only one answered here.
+       */
+      payoutConfigured: Boolean(m.razorpayAccountId),
       products: run ? Number(run.product_count) : 0,
       variants: run ? Number(run.variant_count) : 0,
       adapter: run ? String(run.adapter) : null,
@@ -549,6 +578,48 @@ export function buildApp(): FastifyInstance {
       ...p,
       variants: p.variants.map((v) => ({ ...v, priceFormatted: formatInr(v.priceMinor) })),
     }));
+  });
+
+  /**
+   * Where this shop's money goes.
+   *
+   * Strict `owns`, deliberately NOT `ownsViaShop`. The shared demo shop has a
+   * null workspace and every other shop-scoped route treats that as "everyone's
+   * "-- which is right for an approval queue on a sandbox and catastrophic
+   * here, because it would let any visitor redirect the seeded shop's takings
+   * to an account of their own. A payout destination is the one shop-shaped
+   * thing that is never shared.
+   */
+  app.post('/api/merchants/:id/payout', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const m = getMerchant(id);
+    if (!m) return reply.code(404).send({ error: 'not_found' });
+    if (!owns(request as never, m.workspaceId)) return reply.code(404).send({ error: 'not_found' });
+
+    const raw = (request.body as { accountId?: string | null } | undefined)?.accountId;
+    // An empty value clears it, which is how a merchant stops us paying an
+    // account that is no longer theirs. Anything else must look like one.
+    const accountId = typeof raw === 'string' ? raw.trim() : '';
+    if (accountId && !/^acc_[A-Za-z0-9]{8,}$/.test(accountId)) {
+      return reply.code(400).send({
+        error: 'bad_account',
+        message: 'A Razorpay Route linked account id looks like acc_XXXXXXXXXXXX. Leave it empty to stop transfers.',
+      });
+    }
+
+    const updated = setMerchantPayout(m.id, accountId || null);
+    record({
+      actor: approver(request as never),
+      action: accountId ? 'merchant.payout_set' : 'merchant.payout_cleared',
+      subjectId: m.id, outcome: 'ok',
+      detail: {
+        account: accountId || null, shop: m.slug,
+        note: accountId
+          ? 'Captured payments for this shop are transferred here in full. Kirana takes no cut.'
+          : 'Transfers stopped. Takings stay in the platform account until a new destination is set.',
+      },
+    });
+    return { merchant: publicMerchant(updated!) };
   });
 
   app.get('/api/audit', async (request, reply) => {
@@ -631,10 +702,27 @@ export function buildApp(): FastifyInstance {
     }),
   );
 
+  /**
+   * Approving is one decision with two halves: how much, and where to.
+   *
+   * The address is validated here and refused loudly rather than stored as
+   * whatever arrived, because the cost of a malformed one is asymmetric -- one
+   * correction now while the person is still looking at the screen, against a
+   * parcel that comes back a week later with the money already moved.
+   */
   app.post('/api/approvals/:id/approve', async (request, reply) => {
     const { id } = request.params as { id: string };
     if (!ownsViaShop(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
-    try { return approveConsent(id, approver(request as never), ws(request as never)); }
+    let delivery;
+    try {
+      delivery = parseDelivery((request.body as { delivery?: unknown } | undefined)?.delivery);
+    } catch (err) {
+      if (err instanceof DeliveryError) {
+        return reply.code(400).send({ error: err.code, field: err.field, message: err.message });
+      }
+      throw err;
+    }
+    try { return approveConsent(id, approver(request as never), ws(request as never), delivery); }
     catch (err) {
       if (err instanceof ConsentError) return reply.code(409).send({ error: err.code, message: err.message });
       throw err;
@@ -676,9 +764,19 @@ export function buildApp(): FastifyInstance {
   // Orders, agents, and the stop button.
   // -------------------------------------------------------------------------
 
+  /**
+   * The address rides along on the list, under the same narrow predicate the
+   * detail route uses -- a merchant has to be able to pack a parcel without
+   * clicking into every order, and the people who may read it are the same two
+   * either way. A platform-persona visitor reading across tenants gets null
+   * here, because reading widely and reading someone's street are different
+   * powers.
+   */
   app.get('/api/orders', async (request) =>
     listOrders(100, scopeFor(request as never)).map((o) => ({
       id: String(o.id), status: String(o.status),
+      delivery: maySeeDelivery(request as never, o) ? readDelivery(o.delivery) : null,
+      settledToMerchant: Boolean(o.razorpay_transfer_id),
       amount: formatInr(Number(o.amount_minor)), amountMinor: Number(o.amount_minor),
       currency: String(o.currency),
       razorpayOrderId: (o.razorpay_order_id as string | null) ?? null,
@@ -718,6 +816,25 @@ export function buildApp(): FastifyInstance {
       payUrl: String(o.status) === 'awaiting_payment' ? ((o.pay_url as string | null) ?? null) : null,
       createdAt: String(o.created_at),
       updatedAt: String(o.updated_at),
+      /**
+       * The destination, under a STRICTER rule than the route that returns it.
+       *
+       * `ownsViaShop` lets a null-workspace shop -- the instance's own seeded
+       * one -- be acted on by any visitor, which is right for a shared sandbox
+       * approval queue and wrong for a home address: on the demo shop it would
+       * hand every visitor every other visitor's street. So this field asks a
+       * narrower question than the route did. Two parties have a reason to see
+       * it: the shop that has to put it on a parcel, and the person who typed
+       * it. Nobody else, and never the agent -- the MCP surface returns no
+       * address at all.
+       */
+      delivery: maySeeDelivery(request as never, o) ? readDelivery(o.delivery) : null,
+      settlement: {
+        // Named plainly, because "paid" and "the merchant has the money" are
+        // different facts and conflating them is how a marketplace hides a gap.
+        transferId: (o.razorpay_transfer_id as string | null) ?? null,
+        pendingReason: (o.transfer_error as string | null) ?? null,
+      },
       audit: forSubject(id, scopeFor(request as never)),
     };
   });
@@ -840,6 +957,18 @@ export function buildApp(): FastifyInstance {
    * is the point -- it is the revoke button for a link that has been pasted
    * somewhere it should not have been.
    */
+  /**
+   * The address this person last used, so approving a second order is one click.
+   *
+   * Under /api/session because it is the caller's own and nobody else's: it is
+   * read from the cookie's workspace and there is no id to pass, which is the
+   * only shape that cannot be pointed at somebody else's address.
+   */
+  app.get('/api/session/delivery', async (request) => {
+    const stored = lastDelivery(ws(request as never));
+    return { delivery: readDelivery(stored) };
+  });
+
   app.get('/api/session/buyer-link', async (request) => {
     const wsId = ws(request as never);
     const key = wsId ? ensureBuyerKey(wsId) : null;

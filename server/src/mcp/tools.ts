@@ -361,7 +361,9 @@ export function toolRequestApproval(ctx: ToolContext, args: { quote_id: string; 
       message:
         'A human must approve this before anything can be charged. Show them the approval link, ' +
         'or tell them to open the Kirana console. Poll get_approval until the status changes; ' +
-        'do not attempt checkout before it says granted.',
+        'do not attempt checkout before it says granted. They also give the delivery address ' +
+        'there, on the same screen — you cannot supply one and you will not be told what it is. ' +
+        'Do not ask them for it in the conversation.',
     };
   } catch (err) {
     if (err instanceof ConsentError) return { error: err.code, message: err.message };
@@ -447,6 +449,16 @@ export async function toolCheckout(ctx: ToolContext, args: { quote_id: string; c
   };
 }
 
+/**
+ * What the agent may know about an order it placed.
+ *
+ * Allowlisted, and the omission that matters is the delivery address. The agent
+ * arranged this purchase and still has no business reading where it is going:
+ * a buyer agent is software someone else wrote, running somewhere we do not
+ * control, and an address is the most personal thing this system holds. The
+ * merchant who has to ship it sees it in their console; nothing on this surface
+ * returns it. Do not add it here for convenience.
+ */
 export function toolGetOrder(ctx: ToolContext, args: { order_id: string }) {
   const o = getOrder(args.order_id);
   if (!o || !allows(ctx, String(o.merchant_id))) return { error: 'not_found', message: `No order ${args.order_id}.` };

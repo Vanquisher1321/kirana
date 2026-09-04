@@ -103,6 +103,30 @@ export function cookieHeader(id: string, secure: boolean): string {
   return bits.join('; ');
 }
 
+/**
+ * The last delivery address this person used.
+ *
+ * Two jobs. It saves them typing seven fields for every order, which is the
+ * difference between approving a second purchase and abandoning it. And it is
+ * what a STANDING approval delivers to: a rule is the human's answer given in
+ * advance, and an answer that cannot say where the parcel goes is not a
+ * complete one -- so a standing rule only fires for someone who has already
+ * given an address, and otherwise the request waits for a person, which is the
+ * fallback the whole module is built on.
+ *
+ * Stored per workspace and never shared. It is read back only for the person
+ * who gave it and the merchant who has to ship to it.
+ */
+export function rememberDelivery(workspaceId: string, deliveryJson: string): void {
+  db.prepare('UPDATE workspaces SET last_delivery = ? WHERE id = ?').run(deliveryJson, workspaceId);
+}
+
+export function lastDelivery(workspaceId: string | null): string | null {
+  if (!workspaceId) return null;
+  const r = db.prepare('SELECT last_delivery AS d FROM workspaces WHERE id = ?').get(workspaceId) as { d?: string | null } | undefined;
+  return (r?.d as string | null) ?? null;
+}
+
 /** Housekeeping for the public sandbox: forget workspaces nobody has used. */
 export function pruneIdleWorkspaces(olderThanHours = 48): number {
   const cutoff = new Date(Date.now() - olderThanHours * 3600_000).toISOString();

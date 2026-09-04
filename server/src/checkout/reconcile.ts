@@ -1,7 +1,7 @@
 import { db, nowIso } from '../lib/db.ts';
 import { record } from '../audit/ledger.ts';
 import { settleOrder } from './checkout.ts';
-import { fetchOrderPayments, fetchPaymentLink, RazorpayError, CircuitOpenError, type CallOptions } from '../razorpay/client.ts';
+import { fetchOrderPayments, fetchPaymentLink, createTransfer, RazorpayError, CircuitOpenError, type CallOptions } from '../razorpay/client.ts';
 
 /**
  * Reconciliation: ask the gateway what actually happened.
@@ -33,8 +33,86 @@ export interface ReconcileReport {
   stillPending: number;
   failed: number;
   skipped: number;
+  /** Paid orders whose money was passed on to the merchant on this sweep. */
+  transferred: number;
   errors: string[];
   ranAt: string;
+}
+
+/**
+ * Pass a paid order's money on to the shop that sold it.
+ *
+ * Until this existed, every rupee an agent spent settled into the PLATFORM's
+ * Razorpay account and stopped there -- which meant the system could prove an
+ * agent had paid, and could not show the merchant being paid. "Make any
+ * merchant transactable" was true up to the point where it mattered most.
+ *
+ * It runs as a sweep rather than inline with settlement for the same reason the
+ * settlement itself is swept: the moment money moves is the moment you most
+ * want a retry. `settleOrder` stays synchronous and cannot be made to fail by a
+ * transfer that did not go through; the order simply carries a paid status, no
+ * transfer id, and the reason it did not, until a later sweep succeeds.
+ *
+ * A shop with no linked account is not an error and is not retried in a loop --
+ * it is a shop that has not told us where its money goes, and both the console
+ * and the ledger say exactly that.
+ */
+async function sweepTransfers(report: ReconcileReport, opts: { limit?: number; rzpOptions?: CallOptions }): Promise<void> {
+  const due = db.prepare(
+    `SELECT o.id, o.razorpay_payment_id AS payment_id, o.amount_minor, o.currency,
+            m.razorpay_account_id AS account, m.slug
+     FROM orders o JOIN merchants m ON m.id = o.merchant_id
+     WHERE o.status = 'paid'
+       AND o.razorpay_payment_id IS NOT NULL
+       AND o.razorpay_transfer_id IS NULL
+       AND m.razorpay_account_id IS NOT NULL
+     ORDER BY o.updated_at ASC LIMIT ?`,
+  ).all(opts.limit ?? 25) as Array<{
+    id: string; payment_id: string; amount_minor: number; currency: string; account: string; slug: string;
+  }>;
+
+  for (const row of due) {
+    try {
+      const out = await createTransfer(row.payment_id, {
+        account: row.account,
+        amountMinor: Number(row.amount_minor),
+        currency: String(row.currency),
+        notes: { kirana_order: row.id, merchant: row.slug },
+      }, opts.rzpOptions);
+
+      const transfer = out.items?.[0];
+      if (!transfer?.id) throw new Error('Razorpay accepted the transfer but named no transfer id.');
+
+      db.prepare('UPDATE orders SET razorpay_transfer_id = ?, transfer_error = NULL, updated_at = ? WHERE id = ?')
+        .run(transfer.id, nowIso(), row.id);
+      report.transferred++;
+      record({
+        actor: 'system:reconciler', action: 'settlement.transferred', subjectId: row.id, outcome: 'ok',
+        detail: {
+          transferId: transfer.id, paymentId: row.payment_id, account: row.account,
+          amountMinor: Number(row.amount_minor), currency: String(row.currency),
+          note: 'The full amount was passed to the shop that sold it. Kirana takes no cut.',
+        },
+      });
+    } catch (err) {
+      if (err instanceof CircuitOpenError) {
+        report.errors.push('gateway circuit open; transfers stopped early');
+        return;
+      }
+      const reason = err instanceof RazorpayError ? `${err.code}: ${err.description}` : (err as Error).message;
+      // Recorded on the row so it is visible, and left WITHOUT a transfer id so
+      // the next sweep tries again. Money already captured is not lost by a
+      // transfer that did not go through; it is money not yet passed on, and
+      // saying so is the honest state.
+      db.prepare('UPDATE orders SET transfer_error = ?, updated_at = ? WHERE id = ?')
+        .run(reason, nowIso(), row.id);
+      report.errors.push(`${row.id}: transfer failed: ${reason}`);
+      record({
+        actor: 'system:reconciler', action: 'settlement.transfer_failed', subjectId: row.id, outcome: 'failed',
+        detail: { paymentId: row.payment_id, account: row.account, reason, willRetry: true },
+      });
+    }
+  }
 }
 
 /** Orders left in limbo long enough that a webhook probably is not coming. */
@@ -61,7 +139,7 @@ const STUCK_AFTER_MS = 10 * 60 * 1000;
 
 export async function reconcile(opts: { limit?: number; rzpOptions?: CallOptions; minAgeMs?: number } = {}): Promise<ReconcileReport> {
   const report: ReconcileReport = {
-    checked: 0, settled: 0, expired: 0, stillPending: 0, failed: 0, skipped: 0, errors: [], ranAt: nowIso(),
+    checked: 0, settled: 0, expired: 0, stillPending: 0, failed: 0, skipped: 0, transferred: 0, errors: [], ranAt: nowIso(),
   };
 
   // A row stuck in `created` never reached the gateway: the process died
@@ -205,7 +283,11 @@ export async function reconcile(opts: { limit?: number; rzpOptions?: CallOptions
     }
   }
 
-  if (report.checked > 0) {
+  // After settlement, not before: an order becomes transferable by being paid,
+  // and the sweep above is what notices that.
+  await sweepTransfers(report, opts);
+
+  if (report.checked > 0 || report.transferred > 0) {
     record({
       actor: 'system:reconciler',
       action: 'reconcile.swept',

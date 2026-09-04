@@ -17,6 +17,7 @@ const { buildApp } = await import('./app.ts');
 const { ingestStorefront } = await import('./catalog/ingest.ts');
 const { getMerchant, searchCatalog } = await import('./catalog/store.ts');
 import type { FastifyInstance } from 'fastify';
+import { SAMPLE_DELIVERY } from './__fixtures__/delivery.ts';
 
 const FIXTURE = readFileSync(new URL('./adapters/__fixtures__/shopify-store.json', import.meta.url), 'utf8');
 const fixtureFetch = async (url: string | URL) => {
@@ -138,8 +139,11 @@ test('the console can approve a pending request, and only a human can', async ()
   // trusted it -- so anyone could write any name into the audit trail, and the
   // default was the maintainer's, meaning every stranger's approval on the
   // public sandbox was recorded as his. Attribution comes from the session.
+  // The address goes in with the yes: approving is one decision with two
+  // halves, how much and where to, and the agent supplies neither.
   const res = await authFetch(`${base}/api/approvals/${target.id}/approve`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ by: 'whoever-i-say' }),
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ by: 'whoever-i-say', delivery: SAMPLE_DELIVERY }),
   });
   const granted = await res.json() as { status: string; grantedBy: string };
   assert.equal(granted.status, 'granted');
@@ -377,7 +381,7 @@ test('SECURITY: a self-asserted agent name cannot inherit a verified agent’s r
   // An impostor sends only the header — no key — and asks for a basket that
   // only the raised ceiling would allow.
   const q = createQuote(merchant.id, [{ variantId: pricey.id, quantity: 2 }], 'trusted-partner');
-  const c = grantConsent({ quoteId: q.id, agentId: 'trusted-partner', capMinor: 5_000_00, scope: merchant.id, grantedBy: 'om' });
+  const c = grantConsent({ quoteId: q.id, agentId: 'trusted-partner', capMinor: 5_000_00, scope: merchant.id, grantedBy: 'om', delivery: SAMPLE_DELIVERY });
 
   // The impostor sends the NAME but proves nothing.
   const decision = authorise({

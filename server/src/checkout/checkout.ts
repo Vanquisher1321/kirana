@@ -8,6 +8,7 @@ import { markQuote, claimQuote, releaseQuote } from './quote.ts';
 import { markConsent, claimConsent, releaseConsent } from './consent.ts';
 import { ensureAgent } from './agents.ts';
 import { getMerchant } from '../catalog/store.ts';
+import { deliveryRef } from './delivery.ts';
 import { createOrder, createPaymentLink, RazorpayError, CircuitOpenError, type CallOptions } from '../razorpay/client.ts';
 
 /** Whoever approved the spend, when the connection itself did not say. */
@@ -100,13 +101,18 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutOutcome> {
   try {
     db.prepare(
       `INSERT INTO orders (id, merchant_id, quote_id, consent_id, agent_id, idempotency_key,
-                           amount_minor, currency, status, created_at, updated_at, buyer_workspace_id)
-       VALUES (?,?,?,?,?,?,?,?, 'created', ?, ?, ?)`,
+                           amount_minor, currency, status, created_at, updated_at, buyer_workspace_id, delivery)
+       VALUES (?,?,?,?,?,?,?,?, 'created', ?, ?, ?, ?)`,
     ).run(orderId, input.merchantId, quote.id, input.consentId, input.agentId, input.idempotencyKey,
       quote.totalMinor, quote.currency, nowIso(), nowIso(),
       // The connection may know the buyer (a buyer link does). If it does not,
       // the approval does: a human approved this from their own console.
-      input.buyerWorkspaceId ?? consentBuyer(input.consentId));
+      input.buyerWorkspaceId ?? consentBuyer(input.consentId),
+      // SNAPSHOT, not a reference. The address is copied off the approval at the
+      // moment of purchase, so that editing a saved address later cannot change
+      // where an order already placed was sent -- and so the merchant's copy of
+      // what they were told to ship to is fixed and auditable.
+      JSON.stringify(decision.consent!.delivery));
   } catch (err) {
     const existing = db.prepare('SELECT id, status FROM orders WHERE idempotency_key = ?').get(input.idempotencyKey) as Record<string, unknown> | undefined;
     if (!existing) {
@@ -221,6 +227,8 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutOutcome> {
         currency: quote.currency,
         razorpayOrderId: rzpOrder.id,
         paymentLinkId: link.id,
+        deliverTo: decision.consent!.delivery ? deliveryRef(decision.consent!.delivery) : null,
+        settlesTo: merchant.razorpayAccountId ? 'merchant' : 'platform',
         checksPassed: decision.checks.length,
       },
     });

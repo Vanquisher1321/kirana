@@ -18,7 +18,12 @@ export default function MerchantView(props: PersonaProps) {
   ) : undefined;
 
   if (page === 'catalogue') return <Catalogue shop={shop} picker={picker} />;
-  if (page === 'orders') return <Orders orders={data.orders} loaded={data.loaded} />;
+  if (page === 'orders') return (
+    <>
+      <Orders orders={data.orders} loaded={data.loaded} />
+      <Payout shop={shop} refresh={props.refresh} onBlocked={props.onBlocked} />
+    </>
+  );
   if (page === 'assistants') return <Assistants data={data} onBlocked={onBlocked} refresh={refresh} />;
   if (page === 'record') return <Record data={data} />;
   return <Overview shop={shop} picker={picker} data={data} refresh={refresh} onBlocked={onBlocked} />;
@@ -269,6 +274,76 @@ function CatalogList({ slug }: { slug: string }) {
   );
 }
 
+/**
+ * Where this shop's money goes.
+ *
+ * Until a shop names a Route linked account, its takings sit in the platform's
+ * Razorpay account -- which is a real state and the reason this card does not
+ * quietly disappear when it is unset. A marketplace that shows a merchant
+ * "₹4,980 revenue" while holding all of it is telling half the truth; the
+ * banner says which half you are looking at.
+ */
+function Payout({ shop, refresh, onBlocked }: {
+  shop?: Merchant;
+} & Pick<PersonaProps, 'refresh' | 'onBlocked'>) {
+  const [account, setAccount] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState('');
+  const [note, setNote] = useState('');
+
+  if (!shop) return null;
+
+  async function save(clear = false) {
+    setBusy(true); setProblem(''); setNote('');
+    try {
+      await api.setPayout(shop!.id, clear ? '' : account.trim());
+      setNote(clear ? 'Transfers stopped. Takings stay with the platform until you set a new account.' : 'Saved. Captured payments for this shop are transferred here in full.');
+      setAccount('');
+      await refresh();
+    } catch (e) {
+      const msg = (e as Error).message ?? 'That did not work.';
+      if (/unauthor/i.test(msg)) onBlocked(); else setProblem(msg);
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <Card
+      title="Where your money goes"
+      sub="Your Razorpay Route linked account. Kirana transfers the full amount of every captured payment and takes no cut."
+      right={<Pill tone={shop.payoutConfigured ? 'ok' : 'warn'}>{shop.payoutConfigured ? 'Paid to your account' : 'Held by the platform'}</Pill>}
+    >
+      {!shop.payoutConfigured && (
+        <div className="banner warn" style={{ marginBottom: 14 }}>
+          This shop has no payout account yet, so money an assistant spends here stays in the
+          platform’s Razorpay account. Nothing is lost — but nothing reaches you either.
+        </div>
+      )}
+      <div className="row" style={{ gap: 10 }}>
+        <input
+          className="field"
+          style={{ flex: 1, minWidth: 240 }}
+          placeholder="acc_XXXXXXXXXXXXXX"
+          value={account}
+          onChange={(e) => setAccount(e.target.value)}
+        />
+        <button className="btn" disabled={busy || account.trim().length === 0} onClick={() => void save()}>
+          {busy ? 'Saving…' : shop.payoutConfigured ? 'Replace account' : 'Save account'}
+        </button>
+        {shop.payoutConfigured && (
+          <button className="btn ghost" disabled={busy} onClick={() => void save(true)}>Stop transfers</button>
+        )}
+      </div>
+      {problem && <div className="tiny" style={{ color: 'var(--bad)', marginTop: 10 }}>{problem}</div>}
+      {note && <div className="tiny" style={{ color: 'var(--ok)', marginTop: 10 }}>{note}</div>}
+      <div className="tiny" style={{ color: 'var(--ink-3)', marginTop: 12 }}>
+        Route is Razorpay’s split-settlement product. Create a linked account in your Razorpay
+        dashboard and paste its id here. Transfers are attempted after each payment is captured,
+        and retried if one does not go through.
+      </div>
+    </Card>
+  );
+}
+
 function Orders({ orders, loaded }: { orders: Order[]; loaded: boolean }) {
   return (
     <>
@@ -276,15 +351,35 @@ function Orders({ orders, loaded }: { orders: Order[]; loaded: boolean }) {
       <Card>
         <Load loaded={loaded} items={orders} rows={4} empty="No AI orders yet.">{(rows) => (
           <table>
-            <thead><tr><th>Order</th><th>Amount</th><th>Status</th><th>Razorpay</th><th>When</th></tr></thead>
+            <thead><tr><th>Order</th><th>Amount</th><th>Status</th><th>Ship to</th><th>Razorpay</th><th>When</th></tr></thead>
             <tbody>
               {rows.map((o) => (
                 <tr key={o.id}>
                   <td className="mono" style={{ fontSize: 12 }}>{o.id}</td>
-                  <td className="num" style={{ fontWeight: 600 }}>{o.amount}</td>
+                  <td className="num" style={{ fontWeight: 600 }}>
+                    {o.amount}
+                    {/* Paid and "you have the money" are different facts, and a
+                        marketplace that conflates them is hiding the gap. */}
+                    {o.status === 'paid' && (
+                      <div className="tiny" style={{ color: o.settledToMerchant ? 'var(--ok)' : 'var(--warn)', marginTop: 3 }}>
+                        {o.settledToMerchant ? 'sent to your account' : 'not yet transferred'}
+                      </div>
+                    )}
+                  </td>
                   <td>
                     <Pill tone={statusTone(o.status)}>{statusWord(o.status)}</Pill>
                     {o.failureReason && <div className="tiny" style={{ marginTop: 4 }}>{o.failureReason}</div>}
+                  </td>
+                  <td style={{ fontSize: 12, maxWidth: 220 }}>
+                    {o.delivery ? (
+                      <>
+                        <div style={{ fontWeight: 500 }}>{o.delivery.name}</div>
+                        <div className="dim">
+                          {[o.delivery.line1, o.delivery.line2, o.delivery.city, o.delivery.state].filter(Boolean).join(', ')}
+                        </div>
+                        <div className="mono dim">{o.delivery.pincode} · {o.delivery.phone}</div>
+                      </>
+                    ) : <span className="dim">—</span>}
                   </td>
                   <td className="mono dim" style={{ fontSize: 12 }}>{o.razorpayPaymentId ?? o.razorpayOrderId ?? '—'}</td>
                   <td className="dim">{timeAgo(o.createdAt)}</td>

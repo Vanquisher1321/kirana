@@ -22,8 +22,19 @@ export interface Merchant {
   name: string; originUrl: string; platform: string;
   currency: string; ingestedAt: string; products: number; variants: number;
   adapter: string | null; usedLlm: boolean; warnings: string[]; durationMs: number; mcpUrl: string;
+  /** Whether this shop has a Route account of its own to be paid into. */
+  payoutConfigured: boolean;
 }
 export interface QuoteLine { item: string; quantity: number; unitPrice: string; lineTotal: string; }
+/**
+ * Where the goods go. Given by the person approving, on the same screen and in
+ * the same action as the amount -- the agent can neither supply one nor read
+ * one back.
+ */
+export interface Delivery {
+  name: string; phone: string; line1: string; line2: string;
+  city: string; state: string; pincode: string;
+}
 export interface Approval {
   id: string; quoteId: string; agentId: string | null; capMinor: number; capFormatted: string;
   scope: string; status: string; expiresAt: string;
@@ -37,6 +48,10 @@ export interface Order {
   id: string; status: string; amount: string; amountMinor: number; currency: string;
   razorpayOrderId: string | null; razorpayPaymentId: string | null;
   failureReason: string | null; agentId: string | null; payUrl: string | null; createdAt: string;
+  /** Null unless you sold this order or placed it. Never sent to an agent. */
+  delivery: Delivery | null;
+  /** Paid is not the same fact as "the shop has the money". */
+  settledToMerchant: boolean;
 }
 export interface Agent {
   id: string; label: string; perOrderCap: string; dailyCap: string;
@@ -78,6 +93,23 @@ export class Unauthorized extends Error {
   constructor() { super('A console token is required.'); this.name = 'Unauthorized'; }
 }
 
+/**
+ * A refusal that names the box it is about.
+ *
+ * The server already says which field it rejected; throwing a bare Error threw
+ * that away and left the console guessing the field back out of the prose --
+ * which got it wrong the moment the message said "mobile" and the field was
+ * called "phone". Carry the answer instead of re-deriving it.
+ */
+export class FieldError extends Error {
+  field?: string;
+  constructor(message: string, field?: string) {
+    super(message);
+    this.name = 'FieldError';
+    this.field = field;
+  }
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -93,7 +125,10 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 401) throw new Unauthorized();
   const text = await res.text();
   const body = text ? JSON.parse(text) : {};
-  if (!res.ok) throw new Error((body as { error?: string; message?: string }).message ?? (body as { error?: string }).error ?? `Request failed (${res.status})`);
+  if (!res.ok) {
+    const b = body as { error?: string; message?: string; field?: string };
+    throw new FieldError(b.message ?? b.error ?? `Request failed (${res.status})`, b.field);
+  }
   return body as T;
 }
 
@@ -111,7 +146,13 @@ export const api = {
   approvals: (scope: Scope = 'mine') => req<Approval[]>(`/api/approvals${q(scope)}`),
   // No `by` field: the server attributes an approval to the session that made
   // it. A name the caller supplies is not evidence of who approved.
-  approve: (id: string) => req<Approval>(`/api/approvals/${id}/approve`, { method: 'POST', body: '{}' }),
+  approve: (id: string, delivery: Delivery) =>
+    req<Approval>(`/api/approvals/${id}/approve`, { method: 'POST', body: JSON.stringify({ delivery }) }),
+  lastDelivery: () => req<{ delivery: Delivery | null }>('/api/session/delivery'),
+  setPayout: (merchantId: string, accountId: string) =>
+    req<{ merchant: Merchant }>(`/api/merchants/${merchantId}/payout`, {
+      method: 'POST', body: JSON.stringify({ accountId }),
+    }),
   reject: (id: string) => req<Approval>(`/api/approvals/${id}/reject`, { method: 'POST', body: '{}' }),
   audit: (limit = 60, scope: Scope = 'mine') => req<AuditRow[]>(`/api/audit?limit=${limit}${scope === 'platform' ? '&scope=platform' : ''}`),
   verify: () => req<Verification>('/api/audit/verify'),

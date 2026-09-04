@@ -33,10 +33,12 @@ here so you do not have to go looking.
 
 | The bar | Where it is | What you will find |
 |---|---|---|
-| **Explainable** | [`server/src/checkout/guard.ts`](server/src/checkout/guard.ts) — `authorise()` | One choke point every rupee passes through. It returns the **full check list, pass or fail** — 13 named gates, each carrying a plain-English sentence: *"The same request can never charge twice."* *"Approval is tied to one specific basket."* A guard that returned a bare boolean could not explain itself, so this one never does. |
+| **Explainable** | [`server/src/checkout/guard.ts`](server/src/checkout/guard.ts) — `authorise()` | One choke point every rupee passes through. It returns the **full check list, pass or fail** — 14 named gates, each carrying a plain-English sentence: *"The same request can never charge twice."* *"Approval is tied to one specific basket."* A guard that returned a bare boolean could not explain itself, so this one never does. |
 | **Bounded** | `guard.ts` — `agentCaps()`, `spentTodayMinor()`<br>[`checkout/standing.ts`](server/src/checkout/standing.ts) | A per-order ceiling and a rolling 24-hour ceiling on every agent. ₹2,000 / ₹10,000 for anyone who has not proven an identity, and no way to raise them from the agent side. Standing approvals add two more ceilings and a hard expiry. |
 | **Gated** | [`checkout/consent.ts`](server/src/checkout/consent.ts) | An agent may **request** approval and can never **grant** it — the two paths are separate functions and only the console reaches the second. Consent is scoped to one basket, one agent, and a clock. A kill switch stops every agent mid-flight. |
-| **Show the audit trail** | [`server/src/audit/ledger.ts`](server/src/audit/ledger.ts)<br>`GET /api/audit/verify`<br>Merchant console → **The Record** | Append-only and hash-chained: each line seals the one before it, so an edited, reordered or deleted entry is detectable rather than merely discouraged. The verify endpoint re-reads and re-hashes every row and answers whether the chain still holds. 45 distinct action types are recorded. |
+| **Show the audit trail** | [`server/src/audit/ledger.ts`](server/src/audit/ledger.ts)<br>`GET /api/audit/verify`<br>Merchant console → **The Record** | Append-only and hash-chained: each line seals the one before it, so an edited, reordered or deleted entry is detectable rather than merely discouraged. The verify endpoint re-reads and re-hashes every row and answers whether the chain still holds. 49 distinct action types are recorded. |
+| **The buyer says where it goes** | [`checkout/delivery.ts`](server/src/checkout/delivery.ts)<br>`guard.ts` — `delivery_known` | Every other gate bounds how MUCH an agent spends; none of them bounds WHERE the goods land. An agent that could name the delivery address would not need to break a cap to steal — it could have a human approve an ordinary basket and ship it elsewhere. So the address is given by the person approving, on the same screen and in the same action as the amount, it is carried on the consent, snapshotted onto the order, and **no tool on the MCP surface can set one or read one back**. |
+| **The merchant is the one who gets paid** | [`checkout/reconcile.ts`](server/src/checkout/reconcile.ts) — `sweepTransfers()`<br>[`razorpay/client.ts`](server/src/razorpay/client.ts) — `createTransfer()` | A captured payment is transferred to the shop's own Razorpay Route linked account, in full — Kirana takes no cut. It runs after capture rather than as a split on the order we create, because customers pay the *link*, which is a different object (see §1 of FAILURES.md). A transfer that fails is recorded on the order and retried; a shop with no account set is left alone and the console says plainly that its takings are still with the platform. **Caveat stated rather than hidden: Route is not exercised against the live API anywhere here** — see the note in `transfer.test.ts`. |
 | **One failure handled gracefully** | [`server/src/razorpay/client.ts`](server/src/razorpay/client.ts) — circuit breaker<br>`checkout.deduplicated`, `checkout.blocked`, `settlement.amount_mismatch` | Four consecutive gateway failures open a breaker for 30 seconds and the next attempt is refused **before** a request is sent, with the reason named. A replayed checkout is deduplicated rather than charged twice. A settlement whose amount does not match the quote is recorded as a mismatch, not accepted. |
 | **Transactable end to end** | Live sandbox | Paste a storefront, get an MCP address, hand it to any assistant. Measured: **33 of 48** real Indian storefronts work today ([COMPATIBILITY.md](COMPATIBILITY.md)) — including 183 products and 956 buying options from Blue Tokai in about eight seconds, re-checked 4 September (the table's 179/952 is the 31 August reading — real catalogues move). |
 
@@ -53,7 +55,7 @@ the proof rather than the claim:
 Also in the repo because the submission asks for it: [ARCHITECTURE.md](ARCHITECTURE.md),
 [SECURITY.md](SECURITY.md), [COMPATIBILITY.md](COMPATIBILITY.md), and
 [FAILURES.md](FAILURES.md) — 8 write-ups of things that broke, how each was
-found, and what changed afterwards. 183 tests, 0 failing.
+found, and what changed afterwards. 206 tests, 0 failing.
 
 ---
 
@@ -192,7 +194,7 @@ because it only knows filenames.
 | `npm run agent -- --url <mcp-url> --want "coffee" --budget 1500` | A buyer agent in your terminal, driving the real protocol |
 | `npm run probe` | Which real Indian storefronts are ingestable right now |
 | `npm run reset` | Wipe and reseed for a clean demo take, without restarting |
-| `npm test` | 183 tests |
+| `npm test` | 206 tests |
 | `npm run hooks:install` | Pre-commit secret scanning (do this once) |
 
 ### Try it as an AI agent
@@ -228,7 +230,7 @@ One system, three people, on a persona switcher.
   `pino-pretty`. **Zero native modules**, so it installs and runs identically on
   Windows, macOS and Linux.
 - **SQLite via `node:sqlite`**, built into Node. No database server.
-- **~6,800 lines** of server source, and **183 tests**.
+- **~7,400 lines** of server source, and **206 tests**.
 
 Money is an integer number of paise everywhere. `parseFloat("499.10") * 100`
 returns `49909.999999999993`, and there is a test asserting we never do that.

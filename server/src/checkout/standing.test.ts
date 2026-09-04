@@ -28,10 +28,21 @@ const {
   matchStandingRule, committedTodayMinor, StandingError,
 } = await import('./standing.ts');
 const { engageKillSwitch, releaseKillSwitch } = await import('./guard.ts');
+const { createWorkspace, rememberDelivery } = await import('../lib/workspace.ts');
+import { SAMPLE_DELIVERY } from '../__fixtures__/delivery.ts';
 
 const RUPEE = 100;
 let verifiedId = '';
 let unverifiedId = '';
+/**
+ * The person whose rule it is, and therefore whose address it ships to.
+ *
+ * A standing rule is a human's answer given in advance, and an answer that
+ * names a ceiling but no destination is half of one -- there is nobody to ask
+ * at capture time. So these rules have an owner who has saved an address,
+ * which is what every rule made from the console has.
+ */
+let owner = '';
 
 /** A quote row the consent can hang off. The price path is tested elsewhere. */
 function fakeQuote(id: string, agentId: string | null) {
@@ -54,11 +65,14 @@ before(() => {
   issueAgentKey(verifiedId, 'Trusted Agent');           // makes it verified
   const u = ensureAgent('drifter', 'Drifter');
   unverifiedId = u!.id;
+
+  owner = createWorkspace('Rule owner').id;
+  rememberDelivery(owner, JSON.stringify(SAMPLE_DELIVERY));
 });
 
 test('a matching rule auto-grants, on the human who made it', () => {
   const rule = createStandingRule({
-    workspaceId: null, agentId: verifiedId,
+    workspaceId: owner, agentId: verifiedId,
     perOrderCapMinor: 500 * RUPEE, dailyCapMinor: 2000 * RUPEE, createdBy: 'om',
   });
   const c = requestConsent({
@@ -92,7 +106,7 @@ test('an unverified agent is never auto-approved, even with a rule naming it', (
 
 test('claiming a verified name without proving it earns nothing', () => {
   const rule = createStandingRule({
-    workspaceId: null, agentId: verifiedId,
+    workspaceId: owner, agentId: verifiedId,
     perOrderCapMinor: 500 * RUPEE, dailyCapMinor: 2000 * RUPEE, createdBy: 'om',
   });
   const c = requestConsent({
@@ -105,7 +119,7 @@ test('claiming a verified name without proving it earns nothing', () => {
 
 test('a basket over the per-order ceiling falls back to asking', () => {
   const rule = createStandingRule({
-    workspaceId: null, agentId: verifiedId,
+    workspaceId: owner, agentId: verifiedId,
     perOrderCapMinor: 500 * RUPEE, dailyCapMinor: 5000 * RUPEE, createdBy: 'om',
   });
   const c = requestConsent({
@@ -118,7 +132,7 @@ test('a basket over the per-order ceiling falls back to asking', () => {
 
 test('many small baskets cannot add up past the daily ceiling', () => {
   const rule = createStandingRule({
-    workspaceId: null, agentId: verifiedId,
+    workspaceId: owner, agentId: verifiedId,
     perOrderCapMinor: 400 * RUPEE, dailyCapMinor: 1000 * RUPEE, createdBy: 'om',
   });
   const statuses: string[] = [];
@@ -136,7 +150,7 @@ test('many small baskets cannot add up past the daily ceiling', () => {
 
 test('revoking a rule stops the next request immediately', () => {
   const rule = createStandingRule({
-    workspaceId: null, agentId: verifiedId,
+    workspaceId: owner, agentId: verifiedId,
     perOrderCapMinor: 500 * RUPEE, dailyCapMinor: 5000 * RUPEE, createdBy: 'om',
   });
   assert.equal(requestConsent({
@@ -170,7 +184,7 @@ test('an expired rule is dead, not merely stale', () => {
 
 test('the kill switch stops approvals given in advance too', () => {
   const rule = createStandingRule({
-    workspaceId: null, agentId: verifiedId,
+    workspaceId: owner, agentId: verifiedId,
     perOrderCapMinor: 500 * RUPEE, dailyCapMinor: 5000 * RUPEE, createdBy: 'om',
   });
   engageKillSwitch('test');
@@ -188,7 +202,7 @@ test('the kill switch stops approvals given in advance too', () => {
 test('a rule cannot be created against an agent that never proved itself', () => {
   assert.throws(
     () => createStandingRule({
-      workspaceId: null, agentId: unverifiedId,
+      workspaceId: owner, agentId: unverifiedId,
       perOrderCapMinor: 100 * RUPEE, dailyCapMinor: 100 * RUPEE, createdBy: 'om',
     }),
     (e: unknown) => e instanceof StandingError && e.code === 'agent_unverified',
@@ -198,7 +212,7 @@ test('a rule cannot be created against an agent that never proved itself', () =>
 test('a daily ceiling below the per-order one is refused rather than silently inert', () => {
   assert.throws(
     () => createStandingRule({
-      workspaceId: null, agentId: verifiedId,
+      workspaceId: owner, agentId: verifiedId,
       perOrderCapMinor: 500 * RUPEE, dailyCapMinor: 100 * RUPEE, createdBy: 'om',
     }),
     (e: unknown) => e instanceof StandingError && e.code === 'daily_below_order',
@@ -207,13 +221,34 @@ test('a daily ceiling below the per-order one is refused rather than silently in
 
 test('a rule always expires, however long a life it asks for', () => {
   const rule = createStandingRule({
-    workspaceId: null, agentId: verifiedId,
+    workspaceId: owner, agentId: verifiedId,
     perOrderCapMinor: 100 * RUPEE, dailyCapMinor: 100 * RUPEE, createdBy: 'om',
     ttlMs: 365 * 24 * 60 * 60 * 1000,
   });
   const life = Date.parse(rule.expiresAt) - Date.parse(rule.createdAt);
   assert.ok(life <= 30 * 24 * 60 * 60 * 1000 + 1000, 'capped at thirty days');
   assert.ok(listStandingRules().some((r) => r.id === rule.id));
+  revokeStandingRule(rule.id);
+});
+
+test('a rule whose owner never saved an address asks a human instead', () => {
+  // The other half of "answered in advance". A ceiling with no destination
+  // cannot complete a purchase: there would be nobody present at capture time
+  // to say where the parcel goes, and the guard would refuse the charge after
+  // the approval had already been spent. Falling back to asking is the same
+  // move every other unmet condition here makes -- a reason to refuse is a
+  // reason to ask, never a reason to fail.
+  const addressless = createWorkspace('No address saved').id;
+  const rule = createStandingRule({
+    workspaceId: addressless, agentId: verifiedId,
+    perOrderCapMinor: 500 * RUPEE, dailyCapMinor: 2000 * RUPEE, createdBy: 'om',
+  });
+  const c = requestConsent({
+    quoteId: fakeQuote('qte_noaddr', verifiedId), agentId: verifiedId,
+    capMinor: 100 * RUPEE, scope: 'mch_test', identityProven: true,
+  });
+  assert.equal(c.status, 'pending', 'no saved address means no silent auto-grant');
+  assert.equal(c.delivery, null);
   revokeStandingRule(rule.id);
 });
 

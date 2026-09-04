@@ -80,8 +80,23 @@ function rowToMerchant(r: Record<string, unknown>): Merchant {
     publicId: (r.public_id as string | null) ?? '',
     workspaceId: (r.workspace_id as string | null) ?? null,
     platform: r.platform as Merchant['platform'], currency: String(r.currency),
+    razorpayAccountId: (r.razorpay_account_id as string | null) ?? null,
     policies: JSON.parse(String(r.policies)), ingestedAt: String(r.ingested_at),
   };
+}
+
+/**
+ * Point a shop's takings at its own Razorpay account.
+ *
+ * Console-only, and deliberately not part of ingestion: reading a storefront
+ * can establish what a shop SELLS and never who it banks with. A linked account
+ * arrives from a person who can prove they are the merchant, which is also why
+ * `null` has to remain expressible -- clearing it is how you stop transferring
+ * to an account that is no longer theirs.
+ */
+export function setMerchantPayout(merchantId: string, accountId: string | null): Merchant | null {
+  db.prepare('UPDATE merchants SET razorpay_account_id = ? WHERE id = ?').run(accountId, merchantId);
+  return getMerchant(merchantId);
 }
 
 function rowToVariant(r: Record<string, unknown>): Variant {

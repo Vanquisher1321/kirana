@@ -291,6 +291,49 @@ A `paid` order now ignores a later failure. A short payment moves to a terminal
 `mismatch` state instead of sitting in `awaiting_payment` forever, re-polling
 the gateway and writing an identical audit row every twenty seconds.
 
+### The agent bounds the amount; only the human bounds the destination
+
+Every cap in this system answers "how much". None of them answered "where to",
+and that asymmetry was exploitable without breaking a single one of them: an
+agent that could name the delivery address does not need to exceed a ceiling to
+steal. It can put together a basket a person would approve without hesitating —
+right shop, right items, right total — and have it shipped somewhere else.
+
+So the address is not an argument. There is no tool on the MCP surface that
+sets one, `request_approval` tells the agent so in as many words, and the value
+is carried on the **consent**, written by the console from the session of the
+person whose money it is. `authorise()` refuses a charge whose approval has no
+destination (`delivery_known`), and the order takes a **snapshot** at checkout,
+so editing a saved address afterwards cannot redirect a purchase already made.
+
+The agent cannot read one back either. `get_order` is allowlisted and the
+address is deliberately not on the list: a buyer agent is software somebody else
+wrote, running somewhere we do not control, and a home address is the most
+personal thing this system holds. It goes to the merchant who has to put it on a
+parcel, to the person who typed it, and nowhere else.
+
+Reading it in the console is guarded more narrowly than the route that returns
+it. Order routes use `ownsViaShop`, which treats an unowned shop — the instance's
+own seeded one — as everybody's, and that is right for a shared sandbox approval
+queue. Applied to an address it would hand every visitor every other visitor's
+street, so the field asks a stricter question: seller, buyer, or operator.
+
+The ledger records that a destination was given without recording it. An audit
+row carries the city, the PIN code and the last four digits of the phone —
+enough to recognise an order in a support call, not enough to deliver to.
+
+### A payout destination is never shared, even when the shop is
+
+`POST /api/merchants/:id/payout` uses strict `owns`, not `ownsViaShop`. Every
+other shop-shaped route treats a null workspace as shared, because the seeded
+demo shop belongs to nobody and a sandbox where strangers cannot approve
+anything is not a sandbox. A payout account is the one exception: sharing it
+would let any visitor point the demo shop's takings at an account of their own,
+and the hash-chained ledger would faithfully record every rupee going to them.
+
+Clearing the account back to null is deliberately expressible, because that is
+how a merchant stops transfers to an account that is no longer theirs.
+
 ### One visitor cannot delete another visitor's data
 
 The sandbox merchant cap ran `ORDER BY ingested_at DESC LIMIT -1 OFFSET keep`
@@ -347,6 +390,19 @@ credible.
   fix: prompt injection through merchant content is unsolved industry-wide.
 - **Test mode only.** The server refuses live keys, so no defence here has been
   exercised against real money.
+- **Route transfers are unexercised against the live API.** The merchant payout
+  path is built to Razorpay's documented shape and fully tested on our side of
+  the seam — the request body, the path, the full amount, one attempt per order,
+  a failure recorded and retried, a shop with no account left alone — but no
+  linked account exists to transfer to and no real order has been placed. What
+  is proven is that we send what the documentation describes; what is not proven
+  is that Razorpay accepts it. This is precisely the class of assumption §1 of
+  FAILURES.md is about, which is why it is written here rather than assumed.
+- **A delivery address is stored in plaintext in SQLite.** It is bounded to the
+  people who need it — the merchant fulfilling, the buyer who gave it, the
+  operator — and kept out of the ledger and the entire MCP surface, but the
+  database file itself is not encrypted at rest, and on the sandbox it lives in
+  `/tmp` on a free instance.
 - **Catalog prices are trusted for shape, not for honesty.** Negative and
   zero prices are now rejected at ingest — a negative line item made every cap
   a statement about a signed sum — but a merchant can still publish whatever
