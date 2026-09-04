@@ -8,6 +8,7 @@ import Merchant_ from './personas/Merchant.tsx';
 import Shopper from './personas/Shopper.tsx';
 import Platform from './personas/Platform.tsx';
 import { Mark } from './ui.tsx';
+import SignIn from './signin.tsx';
 
 export type Persona = 'merchant' | 'shopper' | 'platform';
 
@@ -134,7 +135,7 @@ export default function App() {
   // merchant does not get a platform console and a shopper does not get a
   // merchant one — role is a property of the account, not a tab.
   if (session && !session.role) {
-    return <ChooseRole onChosen={async (r) => {
+    return <SignIn onChosen={async (r) => {
       await api.chooseRole(r);
       const s = await api.session();
       setSession(s);
@@ -313,51 +314,6 @@ export default function App() {
           </div>
         </main>
       </div>
-    </div>
-  );
-}
-
-function ChooseRole({ onChosen }: { onChosen: (r: Persona) => Promise<void> }) {
-  const [busy, setBusy] = useState('');
-  const options: Array<[Persona, string, string]> = [
-    ['merchant', 'I run a shop', 'Make your storefront buyable by AI assistants, decide which ones you trust, and see what they bought.'],
-    ['shopper', 'I have an AI assistant', 'Approve or decline what it wants to spend, set your limits, and see everything it did.'],
-    ['platform', 'I work at Razorpay', 'Merchants onboarded, transactions across every workspace, and what the guards stopped.'],
-  ];
-  return (
-    <div className="app">
-      <header className="topbar">
-        <div className="row" style={{ gap: 10 }}>
-          <div className="mark"><Mark /></div>
-          <div className="brandname">Kirana</div>
-          <div className="brandsub">Make any merchant AI-buyable</div>
-        </div>
-      </header>
-      <div className="body skin-merchant">
-        <main className="main">
-          <div className="page narrow">
-            <PageHeadLite title="Who are you here as?" sub="This decides which console you get. You can only see your own." />
-            <div style={{ display: 'grid', gap: 12 }}>
-              {options.map(([key, title, blurb]) => (
-                <button key={key} className="rolecard" disabled={Boolean(busy)}
-                  onClick={() => { setBusy(key); void onChosen(key).finally(() => setBusy('')); }}>
-                  <div className="h2">{title}{busy === key && <span className="spin" style={{ marginLeft: 10 }} />}</div>
-                  <div className="sub" style={{ margin: '4px 0 0' }}>{blurb}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-        </main>
-      </div>
-    </div>
-  );
-}
-
-function PageHeadLite({ title, sub }: { title: string; sub: string }) {
-  return (
-    <div style={{ marginBottom: 22 }}>
-      <div className="h1 big">{title}</div>
-      <div className="sub">{sub}</div>
     </div>
   );
 }

@@ -398,18 +398,7 @@ tr:hover td { background: var(--card-2); }
 }
 .shopsel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* Role selection and the demo-only role switch. */
-.rolecard {
-  display: block; width: 100%; text-align: left;
-  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg);
-  padding: 22px 24px; box-shadow: var(--sh-1);
-  transition: border-color .14s, box-shadow .18s, transform .14s var(--ease-out);
-}
-.rolecard:hover:not(:disabled) { border-color: var(--accent); box-shadow: var(--sh-2); transform: translateY(-1px); }
-.rolecard:active:not(:disabled) { transform: none; box-shadow: var(--sh-1); }
-.rolecard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.rolecard:disabled { opacity: .55; cursor: not-allowed; }
-
+/* The demo-only role switch. */
 .demoswitch { font-size: 12.5px; color: var(--topbar-dim); padding: 0 8px 0 5px; }
 .rolechip {
   display: inline-flex; align-items: center; padding: 6px 12px; border-radius: var(--r-sm);
@@ -502,4 +491,94 @@ tr:hover td { background: var(--card-2); }
     animation-iteration-count: 1 !important;
     transition-duration: .001ms !important;
   }
+}
+
+/* ---------- the front door ----------
+ *
+ * Two columns: the claim on the left, the thing you came to do on the right.
+ * The form column is fixed and the tell column takes the slack, so the card
+ * never stretches into a letterbox on a wide monitor. Below 900px the tell is
+ * gone entirely — on a phone the form IS the page, and a column of marketing
+ * above it just pushes the button you came for below the fold.
+ */
+
+.signin-body { overflow: auto; }
+
+.signin {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  gap: 72px;
+  align-items: center;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 56px 34px 72px;
+}
+
+.eyebrow {
+  font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .09em;
+  color: var(--accent);
+}
+
+/* The one place the serif is allowed to get big. It is the product's claim,
+   and it is the only line on the page that has to be remembered. */
+.signin-claim {
+  font-family: var(--display); font-weight: 400; font-size: 52px; line-height: 1.04;
+  letter-spacing: -.4px; color: var(--ink); margin: 14px 0 0; text-wrap: balance;
+}
+.signin-lede { font-size: 15.5px; color: var(--ink-3); margin: 18px 0 0; max-width: 44ch; line-height: 1.55; }
+
+.proof { list-style: none; margin: 34px 0 0; padding: 0; display: grid; gap: 18px; max-width: 46ch; }
+.proof li { display: flex; gap: 13px; align-items: flex-start; font-size: 14px; }
+.proof-i {
+  flex: 0 0 32px; height: 32px; display: grid; place-items: center; margin-top: -3px;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--card); color: var(--accent); box-shadow: var(--sh-1);
+}
+.proof b { display: block; font-weight: 600; color: var(--ink); }
+.proof-b { display: block; color: var(--muted); margin-top: 2px; line-height: 1.5; }
+
+.signin-card { padding: 30px 30px 26px; box-shadow: var(--sh-3); border-radius: var(--r-lg); }
+.signin-h { font-family: var(--display); font-weight: 400; font-size: 30px; letter-spacing: -.2px; margin: 0; line-height: 1.1; }
+
+.fieldlabel {
+  display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-2);
+  margin: 18px 0 7px;
+}
+.fieldlabel .opt { font-weight: 400; color: var(--faint); margin-left: 5px; }
+.signin-field { width: 100%; flex: none; }
+
+/* One control, three states — not three buttons that happen to sit together.
+   The track is inset so the selected segment reads as lifted out of it. */
+.segmented {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px;
+  padding: 3px; background: var(--line-3); border: 1px solid var(--line); border-radius: var(--r);
+}
+.seg {
+  padding: 8px 6px; border-radius: var(--r-sm); font-size: 13.5px; font-weight: 600;
+  color: var(--ink-3); transition: background .14s, color .14s, box-shadow .14s;
+}
+.seg:hover[aria-checked="false"] { color: var(--ink); background: color-mix(in srgb, var(--card) 60%, transparent); }
+.seg[aria-checked="true"] { background: var(--card); color: var(--accent); box-shadow: var(--sh-1); }
+.seg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Reserves its own height so switching console does not shunt the form up and
+   down under the pointer. */
+.seg-blurb { font-size: 13px; color: var(--muted); line-height: 1.5; margin: 10px 2px 0; min-height: 3em; }
+
+.signin-note {
+  font-size: 13px; line-height: 1.55; color: var(--warn);
+  background: var(--warn-bg); border: 1px solid var(--warn-line);
+  border-radius: var(--r-sm); padding: 11px 13px; margin: 20px 0 0;
+}
+.signin-note b { font-weight: 600; }
+
+.signin-go { width: 100%; margin-top: 16px; justify-content: center; display: flex; align-items: center; }
+.signin-foot { text-align: center; margin: 14px 0 0; color: var(--faint); }
+
+@media (max-width: 900px) {
+  .signin { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 26px 18px 44px; max-width: 460px; }
+  .signin-tell { display: none; }
+  .signin-card { padding: 24px 22px 22px; box-shadow: var(--sh-2); }
+  .signin-claim { font-size: 36px; }
 }
