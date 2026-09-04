@@ -264,6 +264,14 @@ for (const stmt of [
     revoked_at          TEXT
   )`,
   'CREATE INDEX IF NOT EXISTS idx_standing_ws ON standing_rules(workspace_id)',
+  // The buyer's own MCP address.
+  //
+  // Deliberately NOT the workspace id: that value is the session cookie, and a
+  // cookie that becomes a URL is a session anyone can hand around by pasting a
+  // link. This is a separate secret, minted on demand and rotatable without
+  // signing the visitor out.
+  'ALTER TABLE workspaces ADD COLUMN mcp_key TEXT',
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_mcp_key ON workspaces(mcp_key)',
   // Which standing rule granted an auto-approval, so The Record can answer
   // "who allowed this" with a rule a person made rather than a shrug.
   'ALTER TABLE consents ADD COLUMN standing_rule_id TEXT',

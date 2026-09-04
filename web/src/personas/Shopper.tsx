@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api.ts';
 import { Card, Empty, Load, PageHead, Pill, Skeleton, statusTone, statusWord } from '../ui.tsx';
 import { describe, timeAgo, countdown } from '../plain.ts';
@@ -233,6 +233,24 @@ function Shops({ data, refresh, onBlocked }: Pick<PersonaProps, 'data' | 'refres
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [copied, setCopied] = useState('');
+  const [link, setLink] = useState<string | null>(null);
+  const [rotating, setRotating] = useState(false);
+
+  // Fetched once the visitor is actually on this page, not on every console
+  // load: the key is minted on first ask, and a secret nobody wanted is a
+  // secret that can still leak.
+  useEffect(() => {
+    void api.buyerLink().then((r) => setLink(r.url)).catch(() => {});
+  }, [data.merchants.length]);
+
+  const rotate = async () => {
+    setRotating(true);
+    try {
+      const r = await api.rotateBuyerLink();
+      setLink(r.url);
+    } catch { /* the old link keeps working; nothing was lost */ }
+    setRotating(false);
+  };
 
   async function add() {
     setBusy(true); setErr('');
@@ -254,8 +272,41 @@ function Shops({ data, refresh, onBlocked }: Pick<PersonaProps, 'data' | 'refres
       <PageHead
         big
         title="Shops your assistant can buy from"
-        sub="Give your assistant one of these links and it can browse and buy — within the limits you set."
+        sub="One link covers all of them. Give it to your assistant and it can browse and buy — within the limits you set."
       />
+
+      {/* The one link, first. Per-shop links still exist below, because a
+          merchant handing out their own shop's address is a different job --
+          but a shopper wiring up their assistant should only ever need this. */}
+      <Card
+        title="Your assistant's link"
+        sub="One link for every shop below. Add it to your assistant once; shops you add later are covered automatically."
+        right={link ? (
+          <button className="btn ghost sm" onClick={() => void rotate()} disabled={rotating}>
+            {rotating ? 'Replacing…' : 'Replace link'}
+          </button>
+        ) : undefined}
+      >
+        {link ? (
+          <>
+            <div className="mono tiny" style={{ wordBreak: 'break-all' }}>{link}</div>
+            <div className="row" style={{ marginTop: 10 }}>
+              <button className="btn" onClick={() => copy(link)}>
+                {copied === link ? 'Copied' : 'Copy link'}
+              </button>
+              <span className="tiny dim">
+                In Claude: Customize → Connectors → Add custom connector.
+              </span>
+            </div>
+            <div className="tiny dim" style={{ marginTop: 12 }}>
+              Anyone holding this link can shop your shops, within your limits — it is a key, not a
+              username. Replacing it stops every assistant currently using the old one.
+            </div>
+          </>
+        ) : (
+          <div className="tiny dim">Add a shop below and your link appears here.</div>
+        )}
+      </Card>
 
       <Card title="Add a shop" sub="Any Shopify store. We read the catalogue it already publishes; nothing is installed on their site.">
         <div className="row">
@@ -271,7 +322,7 @@ function Shops({ data, refresh, onBlocked }: Pick<PersonaProps, 'data' | 'refres
         {err && <div className="tiny" style={{ marginTop: 8 }}>{err}</div>}
       </Card>
 
-      <Card title="On the network now">
+      <Card title="On the network now" sub="Each shop also has its own link, for handing to someone who should reach only that shop.">
         <Load loaded={data.loaded} items={data.merchants} rows={3} empty="No shops yet — add one above.">
           {(shops) => (
             <table>

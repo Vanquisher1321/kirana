@@ -1,4 +1,4 @@
-import { getMerchant, searchCatalog, getProduct, latestRun } from '../catalog/store.ts';
+import { getMerchant, searchCatalog, getProduct, latestRun, getVariant } from '../catalog/store.ts';
 import { createQuote, getQuote, QuoteError, type QuoteLineInput } from '../checkout/quote.ts';
 import { formatInr, toMinor } from '../lib/money.ts';
 import { record } from '../audit/ledger.ts';
@@ -16,10 +16,53 @@ import type { Product } from '../types.ts';
  */
 
 export interface ToolContext {
+  /** The shop, on a per-shop connection. Empty string on a buyer connection. */
   merchantId: string;
+  /**
+   * Present only on a BUYER connection: the shops this visitor has connected.
+   *
+   * A buyer link is one connector for every shop its owner has added, which is
+   * what makes an assistant useful across more than one merchant. It is also a
+   * wider capability than a single shop's address, so it is bounded by exactly
+   * this list and nothing widens it at request time -- an id belonging to a
+   * shop outside the list reads as not-found, the same answer a stranger gets.
+   */
+  shopIds?: string[];
   agentId: string | null;
   /** True only when the caller presented a matching agent key. */
   identityProven: boolean;
+}
+
+/** Is this shop inside the connection's reach? */
+function allows(ctx: ToolContext, merchantId: string | null | undefined): boolean {
+  if (!merchantId) return false;
+  return ctx.shopIds ? ctx.shopIds.includes(merchantId) : merchantId === ctx.merchantId;
+}
+
+/** Every shop this connection can act on. One on a shop link, many on a buyer link. */
+function reach(ctx: ToolContext): string[] {
+  return ctx.shopIds ?? (ctx.merchantId ? [ctx.merchantId] : []);
+}
+
+/**
+ * The shops on a buyer's connection, so an assistant can say where it is
+ * shopping before it searches. Only present on a buyer link -- a single shop's
+ * connection already knows its one shop.
+ */
+export function toolListShops(ctx: ToolContext) {
+  const shops = reach(ctx).map((mid) => getMerchant(mid)).filter((m): m is NonNullable<typeof m> => Boolean(m));
+  return {
+    count: shops.length,
+    shops: shops.map((m) => ({
+      merchant_id: m.id,
+      name: m.name,
+      storefront: m.originUrl,
+      currency: m.currency,
+    })),
+    note: shops.length === 0
+      ? 'This buyer has not connected any shops yet. Nothing can be searched or bought until they do.'
+      : 'Search covers all of these at once. Every product and quote names the shop it belongs to.',
+  };
 }
 
 function shapeVariant(v: Product['variants'][number]) {
@@ -98,30 +141,49 @@ export function toolSearchProducts(ctx: ToolContext, args: SearchArgs) {
     return { error: 'bad_price_filter', message: 'Price filters must be plain rupee amounts, e.g. 1500 or "1500.00".' };
   }
 
-  const results = searchCatalog(ctx.merchantId, opts);
+  // One shop or many, the same search. On a buyer link each shop is searched
+  // under the caller's limit and the merged list is trimmed back to it, so a
+  // shop with a large catalogue cannot crowd the others out of the answer.
+  const shops = reach(ctx);
+  const perShop = shops.map((mid) => ({ mid, hits: searchCatalog(mid, opts) }));
+
+  const named = perShop.flatMap(({ mid, hits }) => {
+    const m = getMerchant(mid);
+    return hits.map((pr) => ({
+      ...shapeProduct(pr),
+      // Which shop a price came from is not a detail on a multi-shop link: the
+      // agent has to name it to the human, and the quote will be settled to it.
+      merchant_id: mid,
+      shop: m?.name ?? mid,
+    }));
+  });
+  const results = named.slice(0, opts.limit ?? 10);
+
   record({
     actor: ctx.agentId ? `agent:${ctx.agentId}` : 'agent:anonymous',
     action: 'catalog.searched',
-    subjectId: ctx.merchantId,
+    subjectId: shops.length === 1 ? shops[0] : `buyer:${shops.length}shops`,
     outcome: 'ok',
-    detail: { query: args.query ?? null, filters: { max: opts.maxPriceMinor ?? null, min: opts.minPriceMinor ?? null, inStockOnly: opts.inStockOnly }, hits: results.length },
+    detail: { query: args.query ?? null, filters: { max: opts.maxPriceMinor ?? null, min: opts.minPriceMinor ?? null, inStockOnly: opts.inStockOnly }, hits: results.length, shops: shops.length },
   });
 
   return {
     count: results.length,
-    products: results.map(shapeProduct),
+    products: results,
     note: results.length === 0
-      ? 'Nothing matched. Try fewer words, or drop the price filter — this catalog may simply not carry it.'
+      ? shops.length === 0
+        ? 'No shops are connected to this link yet, so there is nothing to search.'
+        : 'Nothing matched. Try fewer words, or drop the price filter — these catalogues may simply not carry it.'
       : undefined,
   };
 }
 
 export function toolGetProduct(ctx: ToolContext, args: { product_id: string }) {
   const p = getProduct(args.product_id);
-  if (!p || p.merchantId !== ctx.merchantId) {
+  if (!p || !allows(ctx, p.merchantId)) {
     return { error: 'product_not_found', message: `No product ${args.product_id} in this catalog.` };
   }
-  return shapeProduct(p);
+  return { ...shapeProduct(p), merchant_id: p.merchantId, shop: getMerchant(p.merchantId)?.name ?? p.merchantId };
 }
 
 export interface QuoteArgs {
@@ -132,10 +194,25 @@ export function toolCreateQuote(ctx: ToolContext, args: QuoteArgs) {
   const items = Array.isArray(args.items) ? args.items : [];
   const lines: QuoteLineInput[] = items.map((i) => ({ variantId: String(i.variant_id), quantity: Number(i.quantity) }));
 
+  // On a buyer link there is no single shop in context, so the basket names it.
+  // getVariant already knows which merchant a variant belongs to, and
+  // createQuote refuses a cart that spans two of them -- a quote is signed by
+  // one catalogue and settles to one Razorpay account.
+  let merchantId = ctx.merchantId;
+  if (ctx.shopIds) {
+    const first = lines[0] ? getVariant(lines[0].variantId) : null;
+    if (!first || !allows(ctx, first.merchantId)) {
+      return { error: 'variant_not_found', message: `No such item: ${lines[0]?.variantId ?? '(none given)'}.` };
+    }
+    merchantId = first.merchantId;
+  }
+
   try {
-    const q = createQuote(ctx.merchantId, lines, ctx.agentId);
+    const q = createQuote(merchantId, lines, ctx.agentId);
     return {
       quote_id: q.id,
+      merchant_id: merchantId,
+      shop: getMerchant(merchantId)?.name ?? merchantId,
       lines: q.lines.map((l) => ({
         variant_id: l.variantId,
         item: `${l.productTitle} — ${l.variantTitle}`,
@@ -158,7 +235,7 @@ export function toolCreateQuote(ctx: ToolContext, args: QuoteArgs) {
       record({
         actor: ctx.agentId ? `agent:${ctx.agentId}` : 'agent:anonymous',
         action: 'quote.rejected',
-        subjectId: ctx.merchantId,
+        subjectId: merchantId,
         outcome: 'blocked',
         detail: { code: err.code, message: err.message },
       });
@@ -170,7 +247,7 @@ export function toolCreateQuote(ctx: ToolContext, args: QuoteArgs) {
 
 export function toolGetQuote(ctx: ToolContext, args: { quote_id: string }) {
   const q = getQuote(args.quote_id);
-  if (!q || q.merchantId !== ctx.merchantId) {
+  if (!q || !allows(ctx, q.merchantId)) {
     return { error: 'quote_not_found', message: `No quote ${args.quote_id}.` };
   }
   const expired = Date.parse(q.expiresAt) <= Date.now();
@@ -207,7 +284,7 @@ function consoleUrl(): string {
 
 export function toolRequestApproval(ctx: ToolContext, args: { quote_id: string; spend_cap_inr: number | string }) {
   const q = loadQuote(args.quote_id);
-  if (!q || q.merchantId !== ctx.merchantId) return { error: 'quote_not_found', message: `No quote ${args.quote_id}.` };
+  if (!q || !allows(ctx, q.merchantId)) return { error: 'quote_not_found', message: `No quote ${args.quote_id}.` };
 
   let capMinor: number;
   try {
@@ -270,7 +347,7 @@ export function toolGetApproval(ctx: ToolContext, args: { consent_id: string }) 
   // Scoped like every other read: an agent may only see approvals for this
   // merchant that were issued to it. Unscoped, this is the read primitive that
   // turns a leaked consent id into someone else's spending power.
-  if (!c || c.scope !== ctx.merchantId || (c.agentId ?? null) !== (ctx.agentId ?? null)) {
+  if (!c || !allows(ctx, c.scope) || (c.agentId ?? null) !== (ctx.agentId ?? null)) {
     return { error: 'not_found', message: `No approval ${args.consent_id}.` };
   }
   const expired = Date.parse(c.expiresAt) <= Date.now() && c.status === 'pending';
@@ -290,10 +367,23 @@ export function toolGetApproval(ctx: ToolContext, args: { consent_id: string }) 
 
 export async function toolCheckout(ctx: ToolContext, args: { quote_id: string; consent_id: string; idempotency_key?: string }) {
   const key = args.idempotency_key?.trim() || newId('idem');
+
+  // The quote names the shop. On a buyer link that is the only thing that can:
+  // taking it from an argument would let a caller settle one shop's basket to
+  // another shop's account.
+  let merchantId = ctx.merchantId;
+  if (ctx.shopIds) {
+    const q = loadQuote(args.quote_id);
+    if (!q || !allows(ctx, q.merchantId)) {
+      return { paid: false, blocked_by: 'quote_not_found', reason: `No quote ${args.quote_id}.`, gates: [], idempotency_key: key };
+    }
+    merchantId = q.merchantId;
+  }
+
   const out = await checkout({
     quoteId: args.quote_id,
     consentId: args.consent_id,
-    merchantId: ctx.merchantId,
+    merchantId,
     agentId: ctx.agentId,
     identityProven: ctx.identityProven,
     idempotencyKey: key,
@@ -331,7 +421,7 @@ export async function toolCheckout(ctx: ToolContext, args: { quote_id: string; c
 
 export function toolGetOrder(ctx: ToolContext, args: { order_id: string }) {
   const o = getOrder(args.order_id);
-  if (!o || String(o.merchant_id) !== ctx.merchantId) return { error: 'not_found', message: `No order ${args.order_id}.` };
+  if (!o || !allows(ctx, String(o.merchant_id))) return { error: 'not_found', message: `No order ${args.order_id}.` };
   return {
     order_id: String(o.id),
     status: String(o.status),

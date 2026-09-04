@@ -113,3 +113,44 @@ export function pruneIdleWorkspaces(olderThanHours = 48): number {
   }
   return doomed.length;
 }
+
+/**
+ * The buyer's own MCP address.
+ *
+ * One connector, every shop this visitor has connected. Without it a shopper
+ * with five shops adds five connectors, which is the friction that stops a
+ * buyer agent from being useful across more than one merchant.
+ *
+ * The key is a SEPARATE secret from the workspace id. The id is the session
+ * cookie, and a cookie that becomes a URL is a session anyone can take over by
+ * pasting a link into a chat window. This one grants exactly one thing —
+ * shopping the shops in that workspace — and can be rotated without signing the
+ * visitor out of the console.
+ *
+ * Minted on demand rather than at workspace creation: most visitors never ask
+ * for it, and a secret nobody uses is a secret that can still leak.
+ */
+export function ensureBuyerKey(workspaceId: string): string | null {
+  const row = db.prepare('SELECT mcp_key AS k FROM workspaces WHERE id = ?').get(workspaceId) as { k?: string | null } | undefined;
+  if (!row) return null;
+  if (row.k) return row.k;
+  const key = `bkr_${randomBytes(24).toString('base64url')}`;
+  db.prepare('UPDATE workspaces SET mcp_key = ? WHERE id = ?').run(key, workspaceId);
+  return key;
+}
+
+/** Replaces the key, which instantly breaks every connector using the old one. */
+export function rotateBuyerKey(workspaceId: string): string | null {
+  const exists = db.prepare('SELECT 1 FROM workspaces WHERE id = ?').get(workspaceId);
+  if (!exists) return null;
+  const key = `bkr_${randomBytes(24).toString('base64url')}`;
+  db.prepare('UPDATE workspaces SET mcp_key = ? WHERE id = ?').run(key, workspaceId);
+  return key;
+}
+
+/** Resolve a buyer key back to its workspace. Knowing the key IS the capability. */
+export function workspaceForBuyerKey(key: string): string | null {
+  if (!key || !key.startsWith('bkr_')) return null;
+  const r = db.prepare('SELECT id FROM workspaces WHERE mcp_key = ?').get(key) as { id?: string } | undefined;
+  return r?.id ?? null;
+}

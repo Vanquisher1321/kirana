@@ -108,6 +108,10 @@ artifacts/*
 # to judge this one. Reinstall from their upstream repos; nothing here
 # depends on them at build or run time.
 .claude/skills/
+
+# The desktop app drops files it hands you into a folder here. They are working
+# documents -- drafts, scripts, notes -- not part of the project.
+Claude outputs/
 .DS_Store
 Thumbs.db
 ehthumbs.db

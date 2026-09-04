@@ -119,6 +119,8 @@ export const api = {
   agents: (scope: Scope = 'mine') => req<Agent[]>(`/api/agents${q(scope)}`),
   system: () => req<SystemState>('/api/system'),
   session: () => req<Session>('/api/session'),
+  buyerLink: () => req<{ url: string | null; shops: number }>('/api/session/buyer-link'),
+  rotateBuyerLink: () => req<{ url: string | null }>('/api/session/buyer-link/rotate', { method: 'POST', body: '{}' }),
   chooseRole: (role: Role) => req<{ role: Role }>('/api/session/role', { method: 'POST', body: JSON.stringify({ role }) }),
   setFullAccess: (enabled: boolean) => req<Session>('/api/session/full-access', { method: 'POST', body: JSON.stringify({ enabled }) }),
   issueKey: (agentId: string, label?: string) =>

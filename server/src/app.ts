@@ -3,7 +3,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { config } from './lib/config.ts';
 import { ingestStorefront, IngestError } from './catalog/ingest.ts';
 import { getMerchant, getMerchantForMcp, listMerchants, latestRun, searchCatalog } from './catalog/store.ts';
-import { buildMcpServer } from './mcp/server.ts';
+import { buildMcpServer, buildBuyerMcpServer } from './mcp/server.ts';
 import { list as auditList, verify as auditVerify, forSubject, record, workspaceRef } from './audit/ledger.ts';
 import { formatInr } from './lib/money.ts';
 import { listPendingConsents, approveConsent, rejectConsent, revokeConsent, getConsent, consentWorkspace, ConsentError } from './checkout/consent.ts';
@@ -18,7 +18,7 @@ import {
 } from './checkout/standing.ts';
 import { KILL_SWITCH, engageKillSwitch, releaseKillSwitch, killSwitchActive } from './checkout/guard.ts';
 import { enforceMerchantCap } from './lib/selfheal.ts';
-import { COOKIE, ROLES, cookieHeader, createWorkspace, getWorkspace, readCookie, setFullAccess, setWorkspaceRole, touchWorkspace, type Role } from './lib/workspace.ts';
+import { COOKIE, ROLES, cookieHeader, createWorkspace, ensureBuyerKey, getWorkspace, readCookie, rotateBuyerKey, setFullAccess, setWorkspaceRole, touchWorkspace, workspaceForBuyerKey, type Role } from './lib/workspace.ts';
 import { circuitState } from './razorpay/client.ts';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -823,6 +823,36 @@ export function buildApp(): FastifyInstance {
     return reconcile({ minAgeMs: 0 });
   });
 
+  /**
+   * The buyer's own MCP address.
+   *
+   * Console-side only, and minted on first ask rather than at signup: most
+   * visitors never want one, and a secret nobody uses is a secret that can
+   * still leak. Rotating it breaks every connector holding the old link, which
+   * is the point -- it is the revoke button for a link that has been pasted
+   * somewhere it should not have been.
+   */
+  app.get('/api/session/buyer-link', async (request) => {
+    const wsId = ws(request as never);
+    const key = wsId ? ensureBuyerKey(wsId) : null;
+    const shops = listMerchants(wsId);
+    return {
+      url: key ? `${config.publicOrigin || `http://localhost:${config.port}`}/mcp/u/${key}` : null,
+      shops: shops.length,
+    };
+  });
+
+  app.post('/api/session/buyer-link/rotate', async (request, reply) => {
+    const wsId = ws(request as never);
+    if (!wsId) return reply.code(404).send({ error: 'not_found' });
+    const key = rotateBuyerKey(wsId);
+    record({
+      actor: workspaceRef(wsId), action: 'buyer_link.rotated', subjectId: null,
+      outcome: 'ok', detail: {}, workspaceId: wsId,
+    });
+    return { url: key ? `${config.publicOrigin || `http://localhost:${config.port}`}/mcp/u/${key}` : null };
+  });
+
   app.get('/api/system', async () => ({
     demo: config.isDemo,
     killSwitch: {
@@ -931,6 +961,48 @@ export function buildApp(): FastifyInstance {
   // state worth keeping between calls, and statelessness means a dropped tunnel
   // or a restarted process never strands a buyer agent mid-conversation.
   // -------------------------------------------------------------------------
+
+  /**
+   * One connector, every shop this buyer has connected.
+   *
+   * Sits beside /mcp/:slug rather than replacing it. A merchant handing out
+   * their own shop's address is a different thing from a shopper wiring up
+   * their own assistant, and collapsing the two would mean one link whose reach
+   * depends on who is asking.
+   */
+  app.all('/mcp/u/:key', async (request, reply) => {
+    const { key } = request.params as { key: string };
+    const workspaceId = workspaceForBuyerKey(key);
+    if (!workspaceId) {
+      return reply.code(404).send({
+        jsonrpc: '2.0',
+        error: { code: -32001, message: 'This buyer link is not recognised. It may have been rotated.' },
+        id: null,
+      });
+    }
+
+    if (request.method === 'GET' || request.method === 'DELETE') {
+      return reply.code(405).header('allow', 'POST').send({
+        jsonrpc: '2.0',
+        error: { code: -32000, message: 'This MCP endpoint is stateless; use POST.' },
+        id: null,
+      });
+    }
+
+    // Read at request time, never cached: a shop connected a minute ago is
+    // shoppable now, and one removed is gone now.
+    const shops = listMerchants(workspaceId);
+    const agentId = (request as unknown as { agentId?: string | null }).agentId ?? null;
+    const identityProven = (request as unknown as { identityProven?: boolean }).identityProven === true;
+    ensureAgent(agentId, undefined, workspaceId);
+
+    const server = buildBuyerMcpServer(shops, agentId, identityProven);
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    reply.raw.on('close', () => { void transport.close(); void server.close(); });
+    await server.connect(transport);
+    reply.hijack();
+    await transport.handleRequest(request.raw, reply.raw, request.body);
+  });
 
   app.all('/mcp/:slug', async (request, reply) => {
     const { slug } = request.params as { slug: string };
