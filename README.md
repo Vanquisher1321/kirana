@@ -10,7 +10,10 @@ owner to install.
 Paste any Shopify storefront (`bluetokaicoffee.com` works) and you get a live MCP
 address about eight seconds later. Hand that address to any AI assistant — in
 Claude, *Customize → Connectors → Add custom connector* — and ask it to buy
-something. It runs on Razorpay **test** credentials, so no real money can move,
+something.
+
+As a shopper you get **one** link covering every shop you have added, so an
+assistant wired up once keeps working as you add more. It runs on Razorpay **test** credentials, so no real money can move,
 and the server refuses to start on a live key.
 
 The sandbox is a free instance: a cold visit takes about a minute to wake, and it
@@ -347,14 +350,11 @@ Stated here rather than discovered by a reviewer.
 - **A hostile merchant could attempt prompt injection** against a buyer agent
   through a product description. Product text is stripped of markup, but this is
   unsolved industry-wide and is not solved here.
-- **One connector per shop.** A shopper who wants five shops adds five
-  connectors. That is friction, and it is the honest consequence of the security
-  model rather than an oversight: the unguessable `shp_` id in each URL *is* the
-  capability, so one link that reaches many shops would be a capability over a
-  set rather than a shop. Fixing it properly means a merchant argument on all
-  eight tools and a decision about what that broader link is allowed to reach —
-  a different trust model, not a convenience tweak, and not something to ship
-  the day before a deadline.
+- **A buyer link is a bearer key.** One link covers every shop its owner has
+  connected, which is the point — but anyone holding it can shop those shops
+  within the owner's limits. There is no second factor. Rotating it from the
+  console kills the old one instantly, and that is the whole revocation story.
+
 - **Rate limits are in memory** and do not survive a restart or span instances.
 - **UAP is not implemented.** It is not publicly specified and still needs RBI
   approval. Kirana models the *consent shape* — bounded, scoped, expiring,
