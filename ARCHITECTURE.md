@@ -293,7 +293,7 @@ revoke another tenant's records. Audit rows take their workspace from the row's
 subject rather than from an optional argument, because attribution that a call
 site can forget is not a boundary.
 
-`SECURITY.md` has the detail; `FAILURES.md` §10 and §11 have the story of
+`SECURITY.md` has the detail; `FAILURES.md` §7 and §8 have the story of
 getting it wrong twice.
 
 ---

@@ -124,35 +124,7 @@ whether you need the thing at all.
 
 ---
 
-## 4. An edit of ours silently deleted the entire MCP endpoint
-
-**Self-inflicted, and the most instructive.**
-
-### What happened
-
-While rewriting the webhook handler with a scripted edit, the replaced span
-reached further than intended and removed the `app.all('/mcp/:slug')` route
-outright. The server still started. Health checks still passed. **No buyer agent
-could reach any merchant** — which is the entire product.
-
-### How it was caught
-
-Every MCP test went red simultaneously, about ninety seconds later. The suite
-drives real JSON-RPC over real HTTP against a listening server rather than
-mocking the transport, so "the route does not exist" is indistinguishable from
-"the handshake fails" — and both fail loudly.
-
-Had those tests been shallower — asserting on handler functions instead of the
-wire — we would have shipped a repo whose central feature was absent.
-
-### What changed
-
-Broad scripted edits are now anchored on both ends and verified by a route
-inventory afterwards, not just by a typecheck.
-
----
-
-## 5. SQL parameters bound in the wrong order returned silently wrong rows
+## 4. SQL parameters bound in the wrong order returned silently wrong rows
 
 ### What happened
 
@@ -173,28 +145,7 @@ price-ceiling test asserting specific counts rather than "some results".
 
 ---
 
-## 6. A foreign key caught that agents were never really registered
-
-Consent rows referenced an `agents` table that nothing ever wrote to. The
-constraint failed, which was the database telling us the identity model was
-incomplete.
-
-Fixing it forced a decision we had been avoiding: **what do you do with an agent
-that has never introduced itself?** Refusing unknown agents makes the system
-useless in an ecosystem whose whole premise is that any agent can walk up to any
-shop. Letting them in uncapped is reckless.
-
-So: let them in, cap them low, record the moment they first appeared, and refuse
-to raise the cap until they prove an identity with a key. A name in a header
-proves nothing — anyone can send the same header.
-
-A second correction followed: agents were registering on their first *purchase*
-rather than their first *contact*. An agent that has only browsed is still an
-agent the merchant should be able to see and cap.
-
----
-
-## 7. A failed payment attempt was closing the order
+## 5. A failed payment attempt was closing the order
 
 Discovered in the same incident as failure #1. The customer's first attempt
 failed 3-D Secure authentication — the single most common outcome in Indian card
@@ -208,29 +159,7 @@ test named after this incident: it fails, retries on the same link, and settles.
 
 ---
 
-## 8. Environment failures worth recording
-
-**SQLite WAL mode threw a bare `disk I/O error`.** WAL needs a shared-memory
-sidecar file that some filesystems — network shares, virtualised mounts, certain
-Windows setups — refuse. The error names none of that. Journal mode is now
-attempted and quietly abandoned rather than being a hard dependency; throughput
-is irrelevant at this scale, portability is not.
-
-**Node's strip-only TypeScript rejects parameter properties.** `constructor(readonly x)`
-fails with `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`, because the mode erases types
-rather than transforming code — the same applies to enums and namespaces. This is
-the price of having no build step, and we decided it was worth paying so that a
-reviewer can clone and run with no toolchain.
-
-**`node_modules` is not portable across operating systems.** Installing from a
-Linux environment into a Windows-mounted folder produced Linux binaries for
-`rollup` and `esbuild`, and the Windows build then failed with `MODULE_NOT_FOUND`.
-The server has zero native dependencies specifically so it does not have this
-problem; only the web build does.
-
----
-
-## 9. Interface failures we found by looking, not by testing
+## 6. Interface failures we found by looking, not by testing
 
 Typechecks and unit tests pass happily on an interface that is wrong. These were
 found by rendering it and inspecting it.
@@ -254,7 +183,7 @@ does more for perceived quality than its design does.**
 
 ---
 
-## 10. Adding multi-tenancy opened a hole bigger than the one it closed
+## 7. Adding multi-tenancy opened a hole bigger than the one it closed
 
 The sandbox was open by design, and that felt wrong once it was real: any
 visitor could see any other visitor's shops and orders. So workspaces went in —
@@ -316,9 +245,9 @@ testing — `grep -c` on the route list, against the number of routes.
 
 ---
 
-## 11. The second review found more than the first, and the worst of it was ours
+## 8. The second review found more than the first, and the worst of it was ours
 
-After §10 we ran a second pass — two independent adversarial reviewers over
+After §7 we ran a second pass — two independent adversarial reviewers over
 distinct areas, plus live probing. It found more than the first pass did, and
 the three most serious findings were all introduced by fixes.
 
@@ -336,7 +265,7 @@ row's subject, so no call site can forget it; unowned rows belong to the
 platform view; and every value written is scrubbed, so an id that slips through
 anyway becomes a one-way reference rather than a credential.
 
-**A self-selected role could approve a stranger's spending.** §10 added `owns()`
+**A self-selected role could approve a stranger's spending.** §7 added `owns()`
 so one tenant could not approve another's. It granted an exception to the
 platform role and to reviewer mode — which, on the sandbox, any visitor may
 hand themselves with one unauthenticated POST, deliberately, so judges can see

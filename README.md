@@ -52,7 +52,7 @@ the proof rather than the claim:
 
 Also in the repo because the submission asks for it: [ARCHITECTURE.md](ARCHITECTURE.md),
 [SECURITY.md](SECURITY.md), [COMPATIBILITY.md](COMPATIBILITY.md), and
-[FAILURES.md](FAILURES.md) — 11 write-ups of things that broke, how each was
+[FAILURES.md](FAILURES.md) — 8 write-ups of things that broke, how each was
 found, and what changed afterwards. 183 tests, 0 failing.
 
 ---
