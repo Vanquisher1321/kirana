@@ -1066,6 +1066,26 @@ export function buildApp(): FastifyInstance {
       if (/^\/+(api|mcp|webhooks)\b/i.test(decoded)) {
         return reply.code(404).send({ error: 'not found' });
       }
+      /**
+       * .well-known must 404, and 404 is the ANSWER, not a failure.
+       *
+       * An MCP client asks /.well-known/oauth-authorization-server and
+       * /.well-known/oauth-protected-resource before it connects. A 404 there
+       * means "this server has no sign-in, just talk to me" -- which is true,
+       * because the unguessable id in the URL is the whole capability.
+       *
+       * The handler below answers every unknown path with the console's
+       * index.html so the single-page app can route it, and that turned those
+       * two probes into 200 text/html. The client read 200 as "there IS a sign
+       * in service", tried to register a client against a page of HTML, and
+       * failed -- so Claude could not add the connector at all. The product's
+       * entire promise is "paste this link into your assistant"; it was broken
+       * for the assistant it was demonstrated with, by a catch-all written for
+       * an unrelated reason.
+       */
+      if (/^\/+\.well-known\b/i.test(decoded)) {
+        return reply.code(404).send({ error: 'not found', note: 'Kirana MCP endpoints need no authorisation.' });
+      }
       const asset = lookup(bundle, request.url) ?? bundle.index!;
       return reply
         .type(asset.contentType)
@@ -1078,6 +1098,26 @@ export function buildApp(): FastifyInstance {
       try { decoded = decodeURIComponent(request.url); } catch { /* keep raw */ }
       if (/^\/+(api|mcp|webhooks)\b/i.test(decoded)) {
         return reply.code(404).send({ error: 'not found' });
+      }
+      /**
+       * .well-known must 404, and 404 is the ANSWER, not a failure.
+       *
+       * An MCP client asks /.well-known/oauth-authorization-server and
+       * /.well-known/oauth-protected-resource before it connects. A 404 there
+       * means "this server has no sign-in, just talk to me" -- which is true,
+       * because the unguessable id in the URL is the whole capability.
+       *
+       * The handler below answers every unknown path with the console's
+       * index.html so the single-page app can route it, and that turned those
+       * two probes into 200 text/html. The client read 200 as "there IS a sign
+       * in service", tried to register a client against a page of HTML, and
+       * failed -- so Claude could not add the connector at all. The product's
+       * entire promise is "paste this link into your assistant"; it was broken
+       * for the assistant it was demonstrated with, by a catch-all written for
+       * an unrelated reason.
+       */
+      if (/^\/+\.well-known\b/i.test(decoded)) {
+        return reply.code(404).send({ error: 'not found', note: 'Kirana MCP endpoints need no authorisation.' });
       }
       return reply.code(404).send({
         service: 'kirana',
