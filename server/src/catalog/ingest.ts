@@ -4,6 +4,7 @@ import { record } from '../audit/ledger.ts';
 import { nowIso } from '../lib/db.ts';
 import type { FetchLike, IngestOptions, StorefrontAdapter } from '../types.ts';
 import { normaliseOrigin, makeFetch } from '../lib/http.ts';
+import { robotsAllows } from '../lib/robots.ts';
 import { assertFetchableUrl, BlockedHostError } from '../lib/security.ts';
 
 export { normaliseOrigin, makeFetch };
@@ -72,6 +73,35 @@ export async function ingestStorefront(
         : `Refusing to fetch ${origin}.`,
       origin,
     );
+  }
+
+  /**
+   * Ask before reading.
+   *
+   * The product feed is public and a default Shopify robots.txt does not
+   * disallow it, so this refuses almost nothing. That is the point: the claim
+   * worth being able to make to a merchant is not "your data was public", it is
+   * "your data was public and we checked what you asked for first". It fails
+   * open -- a missing or unreachable robots.txt is no preference stated, not a
+   * refusal -- and it is skipped when a caller injects its own transport, for
+   * the same reason the SSRF guard is: no request reaches the network at all.
+   */
+  if (guard) {
+    // Its own short timeout, not the ingest's. This is a courtesy check on a
+    // file most shops never think about; it must not be able to hold a shop's
+    // connection hostage for fifteen seconds because one static file is slow.
+    const verdict = await robotsAllows(origin, '/products.json', makeFetch(4_000));
+    if (!verdict.allowed) {
+      record({
+        actor: 'console', action: 'ingest.refused', subjectId: origin, outcome: 'blocked',
+        detail: { origin, reason: 'robots.txt', rule: verdict.rule ?? null },
+      });
+      throw new IngestError(
+        `${origin} asks crawlers not to read its product feed (${verdict.rule}). ` +
+        `Kirana respects that, so this shop cannot be connected without the merchant's involvement.`,
+        origin,
+      );
+    }
   }
 
   record({ actor: 'console', action: 'ingest.started', subjectId: origin, outcome: 'ok', detail: { origin } });

@@ -344,9 +344,13 @@ Stated here rather than discovered by a reviewer.
 - **Marketplaces are out of scope by design, not by accident.** See above: the
   blocker is the right to take the payment, not the ability to read a catalogue.
 - **Test mode only.** No defence here has been exercised against real money.
-- **Ingestion reads without asking.** It only ever reads data a shop already
-  publishes, and identifies itself honestly — but in a real deployment consent
-  would come through Razorpay merchant onboarding, not through crawling.
+- **Ingestion reads without asking.** It only ever reads a feed the shop already
+  publishes to the open web, identifies itself honestly as `KiranaBot` with a
+  contact, and checks `robots.txt` before reading — a shop that disallows the
+  feed is refused, and told which rule refused it. None of that is the same as
+  the merchant agreeing. In a real deployment consent comes through Razorpay
+  merchant onboarding, not through crawling, and that is the first thing to
+  build.
 - **A hostile merchant could attempt prompt injection** against a buyer agent
   through a product description. Product text is stripped of markup, but this is
   unsolved industry-wide and is not solved here.
