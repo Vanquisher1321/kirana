@@ -1,133 +1,135 @@
 /* Kirana console — the visual system.
  *
  * A kirana is the shop on the corner: paper ledgers, a shutter, someone who
- * knows your name. The first version of this console looked like every other
- * dashboard — cold blue-grey, Inter at every size, a gradient square for a
- * logo. It was competent and anonymous.
+ * knows your name. This is the warm-paper world that idea asks for, retoned
+ * against the Kirana Consoles design canvas: one green identity for the two
+ * human consoles, a navy operator console for Razorpay, and Geist doing every
+ * job that Inter and a serif used to split between them.
  *
- * So this is a warm-paper world instead. Ink on paper, one drawn mark, colour
- * spent only where it carries meaning, and a real elevation scale so a card
- * sits on the page rather than being drawn onto it. It still has to read as
- * payments infrastructure, so the restraint is deliberate: the warmth is in
- * the ground, never in saturated colour.
+ * Colour is spent only where it carries meaning. The primary button stays ink,
+ * so the page has exactly one loud thing and the green never competes with it.
  *
- * Three rules the old file broke, all of them caught by a detector:
- *   - nothing below 12.5px, and every text colour clears 4.5:1;
- *   - the status dot no longer pulses, because since polling was removed it
- *     was animating over data that never changes by itself;
- *   - one authored motion moment (the approval card), not five scattered ones.
+ * Every text colour here clears 4.5:1 on the surface behind it, and the ratio
+ * is written next to the ones that sit near the floor. The canvas leaned on a
+ * pale grey (#9a9f97) for its uppercase micro-labels -- the single most-used
+ * colour in it -- at 2.61:1, and on #0d9268 for link text at 3.81:1. Both are
+ * below the floor at the 9.5-11.5px those labels are set in, so the greys are
+ * stepped down here and #0d9268 is kept for fills, borders and glows where it
+ * is not carrying text. Same design; the labels are readable.
  */
 
 :root {
-  /* Ink. Warm, so it belongs to the paper rather than sitting on top of it.
-     Every one of these clears 4.5:1 on both --paper and --card. */
-  --ink: #1A1712;
-  --ink-2: #443D33;
-  --ink-3: #57503F;
-  --muted: #6B6357;   /* 5.44:1 on paper */
-  --faint: #746C5E;   /* 4.77:1 on paper — the floor, used sparingly */
+  /* Ink. Warm, so it belongs to the paper rather than sitting on top of it. */
+  --ink: #141711;
+  --ink-2: #3C423B;
+  --ink-3: #4D5249;
+  --muted: #5D635C;   /* 5.96:1 on paper */
+  --faint: #70766D;   /* 4.51:1 on paper — the floor, used sparingly */
 
-  /* Cool paper, warm ink.
-   *
-   * The first pass of this file used a warm cream ground, and a detector named
-   * it for what it was: the reflex "tasteful" surface, reached for because it
-   * is safe rather than because it means anything. The ground is ledger paper
-   * now — the pale grey-green of an accounts book — and the ink stays warm
-   * black on top of it. The tension between the two is the point; a page where
-   * paper and ink share a hue is a page nobody decided. */
-  --paper: #F4F6F1;
+  /* Warm off-white ground, warm ink on top. */
+  --paper: #FBFBFA;
   --card: #FFFFFF;
-  --card-2: #F7F8F4;
-  --line: #E3E6DF;
-  --line-2: #EDEFE9;
-  --line-3: #F2F4EE;
+  --card-2: #F7F7F4;
+  --line: #E7E7E3;
+  --line-2: #EFEFEB;
+  --line-3: #F4F4F1;
 
-  --topbar: #1C1813;
-  --topbar-line: #332C22;
-  --topbar-ink: #F5F0E6;
-  --topbar-dim: #A79D8C;
+  /* The bar is the one near-black surface on the human consoles. Green-black
+     rather than neutral, so it belongs to the same world as the accent. */
+  --topbar: #111817;
+  --topbar-line: #1E2826;
+  --topbar-ink: #EAF1ED;   /* 15.7:1 */
+  --topbar-dim: #9A9F97;   /* 6.67:1 on the bar — the value the canvas could
+                              not afford on paper reads fine on near-black */
 
-  --ok: #197A4B;
-  --ok-deep: #14603B;
-  --ok-bg: #EEF7F1;
-  --ok-line: #C3E3D0;
-  --bad: #C2382B;
-  --bad-deep: #9E2D22;
-  --bad-bg: #FDF1EF;
-  --bad-line: #F3CDC7;
-  --warn: #9A6207;
-  --warn-bg: #FDF6E9;
-  --warn-line: #EDD9AE;
+  --ok: #0D9268;        /* fills, dots and borders — never text on paper */
+  --ok-deep: #0B7A56;   /* 5.16:1 on paper; white on it is 5.34:1 */
+  --ok-bg: #EAF1ED;
+  --ok-line: #CFE3D9;
+  --bad: #C53030;       /* 5.47:1 */
+  --bad-deep: #A52828;
+  --bad-bg: #FDF1F0;
+  --bad-line: #F3D5D2;
+  --warn: #A66908;      /* 4.52:1 — the canvas amber (#D98A0A) is 2.77:1 */
+  --warn-bg: #FDF7EA;
+  --warn-line: #ECDCB4;
 
   /* Depth. Offset plus soft blur, tinted with the ink rather than pure black,
      so a raised surface looks lit rather than outlined. */
-  --sh-1: 0 1px 1px rgba(26,23,18,.04), 0 1px 3px rgba(26,23,18,.05);
-  --sh-2: 0 1px 2px rgba(26,23,18,.05), 0 6px 16px -4px rgba(26,23,18,.09);
-  --sh-3: 0 2px 4px rgba(26,23,18,.06), 0 16px 40px -8px rgba(26,23,18,.16);
+  --sh-1: 0 1px 1px rgba(20,23,17,.04), 0 1px 3px rgba(20,23,17,.05);
+  --sh-2: 0 1px 2px rgba(20,23,17,.05), 0 6px 16px -4px rgba(20,23,17,.09);
+  --sh-3: 0 2px 4px rgba(20,23,17,.06), 0 16px 40px -8px rgba(20,23,17,.16);
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
-  --sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif;
-  --display: "Instrument Serif", Georgia, "Times New Roman", serif;
-  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* One family, two widths of job. The serif is gone: the canvas sets its
+     headlines in Geist at 600 with tight tracking, and a display face that
+     only appeared on four rules was paying rent it did not earn. */
+  --sans: Geist, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif;
+  --display: Geist, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  --r-sm: 7px;
+  --r-sm: 8px;
   --r: 10px;
   --r-lg: 14px;
 }
 
-/* Per-persona skin. The hue is spent on selection, links and the mark; it is
-   never the primary button, which stays ink so the page has one loud thing. */
+/* Per-persona skin.
+ *
+ * Merchant and shopper share one green, deliberately: they are two views of the
+ * same product, and giving each its own hue said they were separate things. The
+ * Razorpay console is navy and dark, because it is not the product -- it is the
+ * room the product is watched from. */
 .skin-merchant {
   --app-bg: var(--paper);
   --side: var(--card);
   --side-line: var(--line);
-  --accent: #1E4FD8;          /* 6.6:1 on white */
-  --accent-deep: #163CA6;
-  --accent-bg: #EDF2FE;
-  --accent-line: #CBD9FA;
+  --accent: #0C8761;          /* 4.51:1 on white — safe as text */
+  --accent-deep: #0B7A56;
+  --accent-bg: #EAF1ED;
+  --accent-line: #CFE3D9;
   --side-w: 240px;
 }
 .skin-shopper {
   --app-bg: var(--paper);
   --side: var(--card);
   --side-line: var(--line);
-  --accent: #0B6E4F;          /* 6.3:1 on white */
-  --accent-deep: #075139;
-  --accent-bg: #EDF6F1;
-  --accent-line: #C2E2D2;
+  --accent: #0C8761;
+  --accent-deep: #0B7A56;
+  --accent-bg: #EAF1ED;
+  --accent-line: #CFE3D9;
   --side-w: 228px;
 }
 .skin-platform {
-  --app-bg: #14110D;
-  --side: #1D1913;
-  --side-line: #2C261D;
-  --accent: #9FB2FF;
-  --accent-deep: #B9C7FF;
-  --accent-bg: rgba(159,178,255,.14);
-  --accent-line: rgba(159,178,255,.28);
+  --app-bg: #0C1428;
+  --side: #101A38;
+  --side-line: #1C2748;
+  --accent: #8B9BC4;          /* 5.58:1 on the card */
+  --accent-deep: #C3CDE4;
+  --accent-bg: rgba(139,155,196,.14);
+  --accent-line: rgba(139,155,196,.30);
   --side-w: 240px;
 
-  --ink: #F6F1E7;
-  --ink-2: #E0D9CB;
-  --ink-3: #CDC5B4;
-  --muted: #A79D8C;   /* 6.5:1 on the dark card */
-  --faint: #8B8271;   /* 4.6:1 */
-  --card: #1D1913;
-  --card-2: #191510;
-  --line: #2C261D;
-  --line-2: #251F18;
-  --line-3: #221D16;
+  --ink: #EEF2FB;
+  --ink-2: #C3CDE4;
+  --ink-3: #A9B6D2;
+  --muted: #8B9BC4;   /* 5.58:1 on the card */
+  --faint: #8695BD;   /* 5.19:1 */
+  --card: #1A2340;
+  --card-2: #101A38;
+  --line: #1C2748;
+  --line-2: #16203C;
+  --line-3: #131C33;
 
-  --ok-bg: rgba(25,122,75,.18);
-  --ok-line: rgba(52,168,110,.34);
-  --ok-deep: #7FD8AC;
-  --bad-bg: rgba(194,56,43,.18);
-  --bad-line: rgba(194,56,43,.36);
-  --bad-deep: #F0A79D;
-  --warn-bg: rgba(154,98,7,.20);
-  --warn-line: rgba(200,140,40,.34);
-  --warn: #E9C07A;
+  --ok-bg: rgba(52,211,153,.14);
+  --ok-line: rgba(52,211,153,.30);
+  --ok-deep: #34D399;   /* 8.04:1 on the card */
+  --bad-bg: rgba(248,113,113,.14);
+  --bad-line: rgba(248,113,113,.32);
+  --bad-deep: #F87171;  /* 5.59:1 */
+  --warn-bg: rgba(251,191,36,.14);
+  --warn-line: rgba(251,191,36,.30);
+  --warn: #FBBF24;      /* 9.26:1 */
 
   --sh-1: 0 1px 2px rgba(0,0,0,.32);
   --sh-2: 0 2px 4px rgba(0,0,0,.3), 0 8px 20px -6px rgba(0,0,0,.45);
@@ -188,9 +190,12 @@ a:hover { text-decoration-thickness: 2px; }
   background: var(--topbar); color: var(--topbar-ink);
   border-bottom: 1px solid var(--topbar-line);
 }
-.mark { display: flex; color: #F0C48A; }
+.mark { display: flex; color: #34D399; }
 .mark svg { display: block; }
-.brandname { font-family: var(--display); font-size: 20px; font-weight: 400; letter-spacing: .1px; line-height: 1; }
+.brandname {
+  font-family: var(--display); font-size: 13.5px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; line-height: 1;
+}
 .brandsub { font-size: 12.5px; color: var(--topbar-dim); padding-left: 12px; border-left: 1px solid var(--topbar-line); }
 
 .personas { display: flex; align-items: center; gap: 2px; padding: 3px; background: rgba(0,0,0,.28); border: 1px solid var(--topbar-line); border-radius: var(--r); }
@@ -199,11 +204,11 @@ a:hover { text-decoration-thickness: 2px; }
 .persona[aria-selected="true"] { background: var(--topbar-ink); color: var(--topbar); }
 
 .live { display: flex; align-items: center; gap: 7px; padding: 5px 11px; border: 1px solid var(--topbar-line); border-radius: var(--r-sm); font-size: 12.5px; font-weight: 500; color: var(--topbar-dim); }
-.live.sandbox { color: #F0C48A; border-color: rgba(240,196,138,.3); background: rgba(240,196,138,.09); }
+.live.sandbox { color: #FBBF24; border-color: rgba(251,191,36,.32); background: rgba(251,191,36,.10); }
 /* Static, deliberately. Nothing polls in the background any more, so a pulse
    here would be animating over data that cannot change on its own. */
-.livedot { width: 7px; height: 7px; border-radius: 50%; background: #34A86E; flex: 0 0 7px; }
-.livedot.bad { background: #E06A5C; }
+.livedot { width: 7px; height: 7px; border-radius: 50%; background: #34D399; flex: 0 0 7px; }
+.livedot.bad { background: #F87171; }
 
 .body { flex: 1; display: flex; min-height: 0; background: var(--app-bg); color: var(--ink); }
 
@@ -242,7 +247,7 @@ a:hover { text-decoration-thickness: 2px; }
    Display is a serif with real character; UI text is Inter. One family per
    job, an obvious step between them, and nothing under 12.5px. */
 
-.h1 { font-family: var(--display); font-size: 32px; font-weight: 400; letter-spacing: -.2px; line-height: 1.12; }
+.h1 { font-family: var(--display); font-size: 29px; font-weight: 600; letter-spacing: -.022em; line-height: 1.14; }
 .h1.big { font-size: 38px; }
 .h2 { font-size: 16.5px; font-weight: 600; letter-spacing: -.15px; line-height: 1.3; }
 .sub { font-size: 14px; color: var(--muted); margin-top: 8px; max-width: 68ch; line-height: 1.55; }
@@ -314,8 +319,8 @@ strong { font-weight: 600; }
 /* Destructive. Its colours are fixed rather than themed: --bad flips to a pale
    pink on the dark console, and the label colour follows --card, which is how
    "Pause all AI spending" ended up as near-black text on red there. */
-.btn.danger { background: #C2382B; color: #fff; box-shadow: var(--sh-1); }
-.btn.danger:hover:not(:disabled) { background: #A32B20; }
+.btn.danger { background: #C53030; color: #fff; box-shadow: var(--sh-1); }
+.btn.danger:hover:not(:disabled) { background: #A52828; }
 .btn.sm { font-size: 13px; padding: 6px 12px; }
 
 .field {
@@ -337,7 +342,7 @@ a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.persona:focus-visible { outline-color: #F0C48A; }
+.persona:focus-visible { outline-color: #34D399; }
 
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 
@@ -415,7 +420,7 @@ tr:hover td { background: var(--card-2); }
 }
 .reviewbtn:hover:not(:disabled) { background: rgba(245,240,230,.09); border-color: rgba(245,240,230,.6); }
 .reviewbtn:disabled { opacity: .5; cursor: not-allowed; }
-.reviewbtn:focus-visible { outline: 2px solid #F0C48A; outline-offset: 2px; }
+.reviewbtn:focus-visible { outline: 2px solid #34D399; outline-offset: 2px; }
 .reviewbtn.off { color: var(--topbar-dim); border-color: var(--topbar-line); }
 
 @media (max-width: 980px) {
@@ -470,7 +475,7 @@ tr:hover td { background: var(--card-2); }
 }
 .budget .shield {
   width: 32px; height: 32px; border-radius: 9px; flex: 0 0 32px; display: grid; place-items: center;
-  background: rgba(240,196,138,.14); color: #F0C48A;
+  background: rgba(52,211,153,.14); color: #34D399;
 }
 .budget .cap { font-size: 14px; font-weight: 600; }
 
@@ -523,8 +528,8 @@ tr:hover td { background: var(--card-2); }
 /* The one place the serif is allowed to get big. It is the product's claim,
    and it is the only line on the page that has to be remembered. */
 .signin-claim {
-  font-family: var(--display); font-weight: 400; font-size: 52px; line-height: 1.04;
-  letter-spacing: -.4px; color: var(--ink); margin: 14px 0 0; text-wrap: balance;
+  font-family: var(--display); font-weight: 600; font-size: 50px; line-height: 1.04;
+  letter-spacing: -.028em; color: var(--ink); margin: 14px 0 0; text-wrap: balance;
 }
 .signin-lede { font-size: 15.5px; color: var(--ink-3); margin: 18px 0 0; max-width: 44ch; line-height: 1.55; }
 
@@ -539,7 +544,7 @@ tr:hover td { background: var(--card-2); }
 .proof-b { display: block; color: var(--muted); margin-top: 2px; line-height: 1.5; }
 
 .signin-card { padding: 30px 30px 26px; box-shadow: var(--sh-3); border-radius: var(--r-lg); }
-.signin-h { font-family: var(--display); font-weight: 400; font-size: 30px; letter-spacing: -.2px; margin: 0; line-height: 1.1; }
+.signin-h { font-family: var(--display); font-weight: 600; font-size: 27px; letter-spacing: -.024em; margin: 0; line-height: 1.12; }
 
 .fieldlabel {
   display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-2);
