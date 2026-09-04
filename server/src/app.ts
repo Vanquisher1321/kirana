@@ -12,6 +12,10 @@ import { listOrders, getOrder, orderWorkspace, settleOrder } from './checkout/ch
 import { reconcile } from './checkout/reconcile.ts';
 import { listAgents, getAgent, setAgentCaps, issueAgentKey, agentForKey, agentWorkspace, ensureAgent } from './checkout/agents.ts';
 import { secretEquals, rateLimit } from './lib/security.ts';
+import {
+  createStandingRule, listStandingRules, getStandingRule, revokeStandingRule,
+  isLive, committedTodayMinor, StandingError,
+} from './checkout/standing.ts';
 import { KILL_SWITCH, engageKillSwitch, releaseKillSwitch, killSwitchActive } from './checkout/guard.ts';
 import { enforceMerchantCap } from './lib/selfheal.ts';
 import { COOKIE, ROLES, cookieHeader, createWorkspace, getWorkspace, readCookie, setFullAccess, setWorkspaceRole, touchWorkspace, type Role } from './lib/workspace.ts';
@@ -745,6 +749,61 @@ export function buildApp(): FastifyInstance {
       note: 'Copy this now — only its hash is stored, so it cannot be shown again.',
       usage: 'Send it as the x-kirana-agent-key header on the MCP endpoint.',
     };
+  });
+
+  // -------------------------------------------------------------------------
+  // Standing approvals — the human's answer, given in advance.
+  //
+  // These three routes live on the CONSOLE side only. Nothing on /mcp reaches
+  // them, which is the property that keeps "an agent cannot approve itself"
+  // true: an agent can trigger a request, and a request can be matched against
+  // a rule, but only a person at a console can put a rule there.
+  // -------------------------------------------------------------------------
+
+  app.get('/api/standing', async (request) => {
+    const rules = listStandingRules(scopeFor(request as never));
+    return rules.map((r) => ({
+      ...r,
+      live: isLive(r),
+      perOrderCap: formatInr(r.perOrderCapMinor),
+      dailyCap: formatInr(r.dailyCapMinor),
+      committedTodayMinor: committedTodayMinor(r.id),
+      committedToday: formatInr(committedTodayMinor(r.id)),
+    }));
+  });
+
+  app.post('/api/standing', async (request, reply) => {
+    const b = request.body as {
+      agentId?: string; perOrderMinor?: number; dailyMinor?: number; ttlMs?: number;
+    } | undefined;
+    // A rule may only ever be written against an agent the caller owns.
+    // Without this, one visitor could hand themselves a standing approval on
+    // another visitor's assistant, which is the human half of the loop taken
+    // away from the person it belongs to.
+    if (b?.agentId && getAgent(b.agentId) && !owns(request as never, agentWorkspace(b.agentId))) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    try {
+      return createStandingRule({
+        workspaceId: ws(request as never),
+        agentId: b?.agentId ?? null,
+        perOrderCapMinor: Number(b?.perOrderMinor),
+        dailyCapMinor: Number(b?.dailyMinor),
+        createdBy: 'console',
+        ttlMs: b?.ttlMs,
+      });
+    } catch (err) {
+      if (err instanceof StandingError) return reply.code(400).send({ error: err.code, message: err.message });
+      throw err;
+    }
+  });
+
+  app.post('/api/standing/:id/revoke', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const rule = getStandingRule(id);
+    if (!rule) return reply.code(404).send({ error: 'not_found' });
+    if (!owns(request as never, rule.workspaceId)) return reply.code(404).send({ error: 'not_found' });
+    return revokeStandingRule(id, 'console');
   });
 
   // Manual sweep, for the console button and for a demo with no tunnel.

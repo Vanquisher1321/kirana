@@ -225,7 +225,28 @@ export function toolRequestApproval(ctx: ToolContext, args: { quote_id: string; 
   }
 
   try {
-    const c = requestConsent({ quoteId: q.id, agentId: ctx.agentId, capMinor, scope: ctx.merchantId });
+    const c = requestConsent({
+      quoteId: q.id, agentId: ctx.agentId, capMinor, scope: ctx.merchantId,
+      identityProven: ctx.identityProven,
+    });
+    // A standing rule may already have answered. Telling the agent to go and
+    // wait for a human when the human decided last Tuesday would send it into
+    // a polling loop against a status that is never going to change.
+    if (c.status === 'granted') {
+      return {
+        consent_id: c.id,
+        status: 'granted',
+        cap: formatInr(c.capMinor),
+        basket_total: formatInr(q.totalMinor),
+        expires_at: c.expiresAt,
+        granted_by: 'a standing approval this person set up in advance',
+        message:
+          'Approved under a standing approval the account holder set earlier, within its ceilings. ' +
+          'No human was asked just now. You may proceed to checkout with this consent_id. ' +
+          'The person can revoke the standing approval at any time, and this grant still expires.',
+      };
+    }
+
     return {
       consent_id: c.id,
       status: 'pending',

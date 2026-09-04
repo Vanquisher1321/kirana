@@ -2,6 +2,7 @@ import { db, nowIso } from '../lib/db.ts';
 import { id } from '../lib/id.ts';
 import { record } from '../audit/ledger.ts';
 import { ensureAgent } from './agents.ts';
+import { matchStandingRule } from './standing.ts';
 
 /**
  * Consent, shaped after UPI Reserve Pay: a human pre-authorises a CAP for a
@@ -50,6 +51,13 @@ export function requestConsent(input: {
   capMinor: number;
   scope: string;
   ttlMs?: number;
+  /**
+   * Did THIS CALLER prove the identity it claims, with a key? Supplied by the
+   * layer that checked the key, for the same reason GuardInput demands it:
+   * looking the id up here would answer "is there a verified agent by this
+   * name", which is the question an impostor wants asked.
+   */
+  identityProven?: boolean;
 }): Consent {
   if (!Number.isSafeInteger(input.capMinor) || input.capMinor <= 0) {
     throw new ConsentError('bad_cap', 'A spending cap must be a positive whole number of paise.');
@@ -68,6 +76,55 @@ export function requestConsent(input: {
     revokedAt: null,
     status: 'pending',
   };
+  /**
+   * Does a standing rule already cover this?
+   *
+   * Read this as the human having answered early, not as the agent approving
+   * itself. matchStandingRule reaches nothing the caller controls: it needs a
+   * key-proven identity, a live unexpired rule a person created from the
+   * console, room under both of that rule's ceilings, and no engaged kill
+   * switch. If any of those is missing it returns null and the request stays
+   * pending, which is the ordinary path -- there is no failure mode here that
+   * turns into a grant.
+   */
+  const match = matchStandingRule({
+    agentId: input.agentId,
+    identityProven: input.identityProven === true,
+    capMinor: consent.capMinor,
+  });
+
+  if (match) {
+    consent.status = 'granted';
+    consent.grantedBy = match.rule.createdBy;
+    consent.grantedAt = new Date(now).toISOString();
+    db.prepare(
+      `INSERT INTO consents (id, quote_id, agent_id, cap_minor, scope, granted_by, granted_at, expires_at, revoked_at, status, standing_rule_id)
+       VALUES (?,?,?,?,?,?,?,?,NULL,'granted',?)`,
+    ).run(
+      consent.id, consent.quoteId, consent.agentId, consent.capMinor, consent.scope,
+      consent.grantedBy, consent.grantedAt, consent.expiresAt, match.rule.id,
+    );
+
+    // Its own action, never plain `consent.granted`. Someone reading The Record
+    // must be able to tell an approval a person clicked from one a rule
+    // answered, and to find the rule that answered it.
+    record({
+      actor: `human:${match.rule.createdBy}`,
+      action: 'consent.auto_granted',
+      subjectId: consent.id,
+      outcome: 'ok',
+      detail: {
+        quoteId: consent.quoteId, capMinor: consent.capMinor, scope: consent.scope,
+        expiresAt: consent.expiresAt, agentId: consent.agentId,
+        standingRuleId: match.rule.id,
+        perOrderCapMinor: match.rule.perOrderCapMinor,
+        dailyHeadroomBeforeMinor: match.headroomMinor,
+        ruleExpiresAt: match.rule.expiresAt,
+      },
+    });
+    return consent;
+  }
+
   db.prepare(
     `INSERT INTO consents (id, quote_id, agent_id, cap_minor, scope, granted_by, granted_at, expires_at, revoked_at, status)
      VALUES (?,?,?,?,?,'','',?,NULL,'pending')`,

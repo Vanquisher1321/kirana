@@ -240,6 +240,33 @@ for (const stmt of [
   'ALTER TABLE workspaces ADD COLUMN role TEXT',
   // Reviewer mode: lets one workspace see all three consoles at once.
   'ALTER TABLE workspaces ADD COLUMN full_access INTEGER NOT NULL DEFAULT 0',
+  /**
+   * Standing authorisation -- the human's answer given in advance.
+   *
+   * Nothing here weakens the rule that an agent cannot grant its own consent.
+   * A row in this table is a decision a PERSON already made, from the console,
+   * with a ceiling and an end date attached; requestConsent applies it on their
+   * behalf. The agent still has no argument it can pass to approve itself, and
+   * every auto-grant names the human whose rule allowed it.
+   *
+   * Every column exists to bound the authorisation: two ceilings, an expiry
+   * that is never optional, and a revoked_at that ends it instantly.
+   */
+  `CREATE TABLE IF NOT EXISTS standing_rules (
+    id                  TEXT PRIMARY KEY,
+    workspace_id        TEXT,
+    agent_id            TEXT REFERENCES agents(id),
+    per_order_cap_minor INTEGER NOT NULL,
+    daily_cap_minor     INTEGER NOT NULL,
+    created_by          TEXT NOT NULL,
+    created_at          TEXT NOT NULL,
+    expires_at          TEXT NOT NULL,
+    revoked_at          TEXT
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_standing_ws ON standing_rules(workspace_id)',
+  // Which standing rule granted an auto-approval, so The Record can answer
+  // "who allowed this" with a rule a person made rather than a shrug.
+  'ALTER TABLE consents ADD COLUMN standing_rule_id TEXT',
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_merchants_public ON merchants(public_id)',
   'CREATE INDEX IF NOT EXISTS idx_merchants_ws ON merchants(workspace_id)',
   'CREATE INDEX IF NOT EXISTS idx_orders_ws ON orders(workspace_id)',
