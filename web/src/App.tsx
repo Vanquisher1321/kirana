@@ -64,33 +64,78 @@ export default function App() {
   const [shopId, setShopId] = useState('');
   const [lastRead, setLastRead] = useState<number | null>(null);
   const [reloading, setReloading] = useState(false);
+  const sealAskedAt = useRef(0);
 
   const refresh = useCallback(async () => {
-    try {
-      // The Razorpay persona reads across every workspace; the merchant and
-      // shopper views are confined to this visitor's own.
-      const scope = personaRef.current === 'platform' ? 'platform' : 'mine';
-      // A shopper browses the whole network of shops -- that is the point of a
-      // directory. A merchant sees only the shops they connected.
-      const shops = personaRef.current === 'shopper' ? 'directory' : scope;
-      // audit/verify re-walks and re-hashes the ENTIRE chain server-side, so
-      // it costs more with every row ever written. Once per deliberate read is
-      // exactly right; it was running twenty times a minute.
-      const wantSeal = true;
-      const [merchants, approvals, audit, orders, agents, system, seal] = await Promise.all([
-        api.merchants(shops), api.approvals(scope), api.audit(60, scope), api.orders(scope), api.agents(scope), api.system(),
-        wantSeal ? api.verify() : Promise.resolve(null),
-      ]);
-      setData((prev) => ({
-        loaded: true, merchants, approvals, audit, orders, agents, system,
-        seal: seal ?? prev.seal,
-      }));
-      setLastRead(Date.now());
-      setErr(''); setLocked(false);
-    } catch (e) {
-      if (e instanceof Unauthorized) setLocked(true);
-      else setErr((e as Error).message);
-    }
+    // The Razorpay persona reads across every workspace; the merchant and
+    // shopper views are confined to this visitor's own.
+    const scope = personaRef.current === 'platform' ? 'platform' : 'mine';
+    // A shopper browses the whole network of shops -- that is the point of a
+    // directory. A merchant sees only the shops they connected.
+    const shops = personaRef.current === 'shopper' ? 'directory' : scope;
+
+    /**
+     * The seal is asked for on a clock of its own, not once per refresh.
+     *
+     * verify() re-walks and re-hashes EVERY row in the audit log, so it costs
+     * more with every row the instance has ever written -- and the server caps
+     * it at 12 a minute for exactly that reason. `wantSeal` was a hardcoded
+     * `true` sitting under a comment claiming the opposite, so the 5s poll
+     * spent that entire budget on the one endpoint that is O(all history):
+     * twelve reads a minute from one tab, and the thirteenth -- a second tab,
+     * the mount read, a persona switch, the refresh button -- came back 429.
+     *
+     * Once a minute is the right cadence for a value that only changes if
+     * somebody edits the database underneath us, and it leaves the budget for
+     * the deliberate reads. Timestamped BEFORE the call so a failure backs off
+     * rather than retrying every five seconds.
+     */
+    const SEAL_EVERY_MS = 60_000;
+    const wantSeal = Date.now() - sealAskedAt.current >= SEAL_EVERY_MS;
+    if (wantSeal) sealAskedAt.current = Date.now();
+
+    /**
+     * One failed read must not blank the console.
+     *
+     * These went out under a single Promise.all, which rejects whole: one 429
+     * on any of the seven -- and the seal was reliably producing one -- meant
+     * setData never ran at all, so the entire dashboard froze on stale numbers
+     * behind an error banner. Everything that answered is shown; anything that
+     * did not keeps its previous value and says so once.
+     */
+    let unauthorized = false;
+    const failures: string[] = [];
+    const soft = async <T,>(p: Promise<T>): Promise<T | null> => {
+      try { return await p; } catch (e) {
+        if (e instanceof Unauthorized) unauthorized = true;
+        else failures.push((e as Error).message);
+        return null;
+      }
+    };
+
+    const [merchants, approvals, audit, orders, agents, system, seal] = await Promise.all([
+      soft(api.merchants(shops)), soft(api.approvals(scope)), soft(api.audit(60, scope)),
+      soft(api.orders(scope)), soft(api.agents(scope)), soft(api.system()),
+      wantSeal ? soft(api.verify()) : Promise.resolve(null),
+    ]);
+
+    // A token problem is about the whole console, not about one endpoint.
+    if (unauthorized) { setLocked(true); return; }
+
+    const answered = [merchants, approvals, audit, orders, agents, system].some((v) => v !== null);
+    setData((prev) => ({
+      loaded: prev.loaded || answered,
+      merchants: merchants ?? prev.merchants,
+      approvals: approvals ?? prev.approvals,
+      audit: audit ?? prev.audit,
+      orders: orders ?? prev.orders,
+      agents: agents ?? prev.agents,
+      system: system ?? prev.system,
+      seal: seal ?? prev.seal,
+    }));
+    if (answered) setLastRead(Date.now());
+    setErr(failures[0] ?? '');
+    setLocked(false);
   }, []);
 
   useEffect(() => {
