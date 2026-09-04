@@ -6,7 +6,7 @@ because a compatibility table without them is marketing.
 
 Measured 31 August 2026 against `https://kirana-6cv8.onrender.com`.
 
-## Works today — 30 of 44 tested
+## Works today — 33 of 48 tested
 
 No cooperation from the shop, no code on their site, no API key. Kirana reads
 the product feed the storefront already publishes.
@@ -50,7 +50,7 @@ the product feed the storefront already publishes.
 \* capped at 500 products by `maxProducts`, not by the shop.
 
 **Over 9,000 products and 26,000 buying options** became agent-purchasable
-across thirty brands — coffee, skincare, luggage, menswear, pet supplies, sarees,
+across thirty-three brands — coffee, skincare, luggage, menswear, pet supplies, sarees,
 mattresses, hot sauce — in about a minute of total wall-clock, and not one of
 those brands did anything or knows about it.
 

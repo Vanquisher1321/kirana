@@ -38,7 +38,7 @@ here so you do not have to go looking.
 | **Gated** | [`checkout/consent.ts`](server/src/checkout/consent.ts) | An agent may **request** approval and can never **grant** it — the two paths are separate functions and only the console reaches the second. Consent is scoped to one basket, one agent, and a clock. A kill switch stops every agent mid-flight. |
 | **Show the audit trail** | [`server/src/audit/ledger.ts`](server/src/audit/ledger.ts)<br>`GET /api/audit/verify`<br>Merchant console → **The Record** | Append-only and hash-chained: each line seals the one before it, so an edited, reordered or deleted entry is detectable rather than merely discouraged. The verify endpoint re-reads and re-hashes every row and answers whether the chain still holds. 35 distinct action types are recorded. |
 | **One failure handled gracefully** | [`server/src/razorpay/client.ts`](server/src/razorpay/client.ts) — circuit breaker<br>`checkout.deduplicated`, `checkout.blocked`, `settlement.amount_mismatch` | Four consecutive gateway failures open a breaker for 30 seconds and the next attempt is refused **before** a request is sent, with the reason named. A replayed checkout is deduplicated rather than charged twice. A settlement whose amount does not match the quote is recorded as a mismatch, not accepted. |
-| **Transactable end to end** | Live sandbox | Paste a storefront, get an MCP address, hand it to any assistant. Measured: **30 of 44** real Indian storefronts work today ([COMPATIBILITY.md](COMPATIBILITY.md)) — including 183 products and 956 buying options from Blue Tokai in about eight seconds. |
+| **Transactable end to end** | Live sandbox | Paste a storefront, get an MCP address, hand it to any assistant. Measured: **33 of 48** real Indian storefronts work today ([COMPATIBILITY.md](COMPATIBILITY.md)) — including 183 products and 956 buying options from Blue Tokai in about eight seconds, re-checked 4 September (the table's 179/952 is the 31 August reading — real catalogues move). |
 
 Two things the bar asks for that are easy to claim and hard to prove, so here is
 the proof rather than the claim:
@@ -339,7 +339,7 @@ Stated here rather than discovered by a reviewer.
 
 - **Shopify only.** The other ingestion routes are designed, not built. A
   WooCommerce or hand-rolled store fails with an explicit "no adapter matched"
-  rather than an empty catalogue. Thirty real shops work today; fourteen tested
+  rather than an empty catalogue. Thirty-three real shops work today; fifteen tested
   do not, and both lists are in [COMPATIBILITY.md](COMPATIBILITY.md).
 - **Marketplaces are out of scope by design, not by accident.** See above: the
   blocker is the right to take the payment, not the ability to read a catalogue.
@@ -389,7 +389,7 @@ in memory that reset on restart and do not span processes. Fine for a sandbox,
 wrong the moment a second instance exists. Postgres, and limits in a shared
 store.
 
-**4. Ingestion beyond Shopify.** Thirty of forty-four tested shops work. The
+**4. Ingestion beyond Shopify.** Thirty-three of forty-eight tested shops work. The
 remaining routes are designed and not built, and the honest gain from each is
 written down in [COMPATIBILITY.md](COMPATIBILITY.md) rather than guessed at.
 
