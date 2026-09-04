@@ -201,9 +201,9 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutOutcome> {
     }, input.rzpOptions);
 
     db.prepare(
-      `UPDATE orders SET razorpay_order_id = ?, razorpay_payment_link_id = ?,
+      `UPDATE orders SET razorpay_order_id = ?, razorpay_payment_link_id = ?, pay_url = ?,
               status = 'awaiting_payment', updated_at = ?, failure_reason = NULL WHERE id = ?`,
-    ).run(rzpOrder.id, link.id, nowIso(), orderId);
+    ).run(rzpOrder.id, link.id, link.short_url ?? null, nowIso(), orderId);
 
     // Both were already burned above, atomically, before the gateway call.
 

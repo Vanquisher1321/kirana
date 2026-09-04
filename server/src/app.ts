@@ -685,6 +685,10 @@ export function buildApp(): FastifyInstance {
       razorpayPaymentId: (o.razorpay_payment_id as string | null) ?? null,
       failureReason: (o.failure_reason as string | null) ?? null,
       agentId: (o.agent_id as string | null) ?? null,
+      // Only while it can still be used. A settled order's link is spent, and a
+      // payment link is a capability -- it need not keep travelling in every
+      // response once it can no longer do anything.
+      payUrl: String(o.status) === 'awaiting_payment' ? ((o.pay_url as string | null) ?? null) : null,
       createdAt: String(o.created_at),
     })),
   );
@@ -708,6 +712,10 @@ export function buildApp(): FastifyInstance {
       razorpayPaymentId: (o.razorpay_payment_id as string | null) ?? null,
       failureReason: (o.failure_reason as string | null) ?? null,
       agentId: (o.agent_id as string | null) ?? null,
+      // Only while it can still be used. A settled order's link is spent, and a
+      // payment link is a capability -- it need not keep travelling in every
+      // response once it can no longer do anything.
+      payUrl: String(o.status) === 'awaiting_payment' ? ((o.pay_url as string | null) ?? null) : null,
       createdAt: String(o.created_at),
       updatedAt: String(o.updated_at),
       audit: forSubject(id, scopeFor(request as never)),

@@ -81,6 +81,31 @@ function Home({ data, refresh, onBlocked }: Pick<PersonaProps, 'data' | 'refresh
         </div>
       </div>
 
+      {/* The step after approving.
+          Approving is not paying: the assistant is told to go to checkout, an
+          order is created, and Razorpay issues a link. That link used to go to
+          the ASSISTANT and nowhere else, so the person who had just approved
+          was left on a screen that said nothing had happened. It appears here
+          now, for as long as it can still be used. */}
+      {data.orders.filter((o) => o.status === 'awaiting_payment' && o.payUrl).map((o) => (
+        <div className="card enter" key={`pay-${o.id}`} style={{ marginBottom: 16 }}>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <div className="h2">Approved — now finish the payment</div>
+            <Pill tone="warn">{statusWord(o.status)}</Pill>
+          </div>
+          <div className="sub" style={{ marginTop: 4 }}>
+            {o.amount} to pay. Razorpay handles the payment itself; Kirana never sees a card.
+          </div>
+          <div className="row" style={{ marginTop: 14 }}>
+            <a className="btn lg" href={o.payUrl ?? '#'} target="_blank" rel="noopener noreferrer"
+               style={{ textDecoration: 'none' }}>
+              Pay {o.amount} on Razorpay
+            </a>
+            <span className="tiny dim">Opens Razorpay in a new tab · test mode, so no real money moves.</span>
+          </div>
+        </div>
+      ))}
+
       {!data.loaded ? <Card><Skeleton rows={3} /></Card> : data.approvals.length === 0 ? (
         <Card>
           <Empty>
@@ -189,7 +214,13 @@ function Limits({ data }: Pick<PersonaProps, 'data'>) {
               {rows.map((o) => (
                 <tr key={o.id}>
                   <td className="num" style={{ fontWeight: 600 }}>{o.amount}</td>
-                  <td><Pill tone={statusTone(o.status)}>{statusWord(o.status)}</Pill></td>
+                  <td>
+                    <Pill tone={statusTone(o.status)}>{statusWord(o.status)}</Pill>
+                    {o.status === 'awaiting_payment' && o.payUrl && (
+                      <a className="btn ghost sm" href={o.payUrl} target="_blank" rel="noopener noreferrer"
+                         style={{ marginLeft: 8, textDecoration: 'none' }}>Pay now</a>
+                    )}
+                  </td>
                   <td className="dim">{timeAgo(o.createdAt)}</td>
                 </tr>
               ))}

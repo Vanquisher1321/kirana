@@ -288,6 +288,13 @@ for (const stmt of [
   // needs to see, and it was found by joining through the merchant as well.
   'ALTER TABLE consents ADD COLUMN buyer_workspace_id TEXT',
   'CREATE INDEX IF NOT EXISTS idx_consents_buyer ON consents(buyer_workspace_id)',
+  // The Razorpay payment link itself, not just its id.
+  //
+  // checkout() handed short_url back to the AGENT and stored only the link id,
+  // so the console -- the place the human who just approved the spend is
+  // actually standing -- had no way to show them where to pay. The approval
+  // finished and the journey stopped.
+  'ALTER TABLE orders ADD COLUMN pay_url TEXT',
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_merchants_public ON merchants(public_id)',
   'CREATE INDEX IF NOT EXISTS idx_merchants_ws ON merchants(workspace_id)',
   'CREATE INDEX IF NOT EXISTS idx_orders_ws ON orders(workspace_id)',

@@ -36,7 +36,7 @@ export interface AuditRow {
 export interface Order {
   id: string; status: string; amount: string; amountMinor: number; currency: string;
   razorpayOrderId: string | null; razorpayPaymentId: string | null;
-  failureReason: string | null; agentId: string | null; createdAt: string;
+  failureReason: string | null; agentId: string | null; payUrl: string | null; createdAt: string;
 }
 export interface Agent {
   id: string; label: string; perOrderCap: string; dailyCap: string;
