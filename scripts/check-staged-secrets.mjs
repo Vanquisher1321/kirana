@@ -22,6 +22,24 @@ const LOCKFILE = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/;
 /** Placeholders and obvious test doubles are not secrets. */
 const DECOY = /(x{6,}|fake|dummy|placeholder|example|sample|your[-_]?|<[a-z]+>)/i;
 
+/**
+ * The webhook secret the test suite signs its own fixtures with.
+ *
+ * This scan reads whole STAGED FILES rather than diffs, which is the right
+ * choice -- a secret already sitting in a file is still a secret -- but it
+ * means a line nobody touched refuses every future commit that goes near it.
+ * `whsec_test_kirana` has been a literal in webhook.test.ts since the webhook
+ * path was written, it authenticates nothing outside this repository's own
+ * tests, and it was blocking edits to the file that contains it.
+ *
+ * Deliberately this one shape and not the word "test". Adding `test` to DECOY
+ * would have been one character shorter and would also have excused
+ * `rzp_test_...`, which is a real Razorpay credential whichever mode it is in.
+ * A scanner that stops flagging a class of live keys to silence one fixture
+ * has been made worse, not quieter.
+ */
+const TEST_FIXTURE = /\bwhsec_test_/i;
+
 /** A run of one repeated character is a test fixture, not a key. */
 const spread = (s) => new Set(s).size;
 
@@ -41,7 +59,10 @@ const RULES = [
   {
     name: 'credential assignment',
     re: /\b(?:token|secret|password|passwd|api[-_]?key)\s*[:=]\s*['"][A-Za-z0-9_\-./+]{16,}['"]/gi,
-    ok: (m) => DECOY.test(m),
+    // TEST_FIXTURE is excused HERE only. The rules above keep judging their own
+    // shapes on their own terms, so a Razorpay key is still a Razorpay key
+    // however it is spelled or whatever it is assigned to.
+    ok: (m) => DECOY.test(m) || TEST_FIXTURE.test(m),
   },
 ];
 
