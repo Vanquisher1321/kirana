@@ -13,6 +13,12 @@ services:
     name: kirana
     runtime: node
     plan: free
+    # Explicit rather than relied upon. A deploy that never appeared after a
+    # push sent us looking at the code first; the build was fine and Render had
+    # lost repo access, so no webhook was arriving. Stating this here means the
+    # blueprint says what the service is supposed to do.
+    autoDeploy: true
+    branch: main
     region: singapore
     buildCommand: npm run build:deploy
     startCommand: npm --prefix server run start
