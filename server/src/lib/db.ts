@@ -275,6 +275,19 @@ for (const stmt of [
   // Which standing rule granted an auto-approval, so The Record can answer
   // "who allowed this" with a rule a person made rather than a shrug.
   'ALTER TABLE consents ADD COLUMN standing_rule_id TEXT',
+  // Who BOUGHT, as distinct from who is being bought from.
+  //
+  // orders.workspace_id and every scoped query derive a tenant by joining
+  // through the merchant, which answers "orders for my shops" and silently
+  // cannot answer "orders I placed". A shopper buying from a shop that is not
+  // theirs -- which is the normal case, since shops are a public directory --
+  // could never see their own purchase.
+  'ALTER TABLE orders ADD COLUMN buyer_workspace_id TEXT',
+  'CREATE INDEX IF NOT EXISTS idx_orders_buyer ON orders(buyer_workspace_id)',
+  // Same gap, one step earlier: an approval REQUEST is the thing a shopper most
+  // needs to see, and it was found by joining through the merchant as well.
+  'ALTER TABLE consents ADD COLUMN buyer_workspace_id TEXT',
+  'CREATE INDEX IF NOT EXISTS idx_consents_buyer ON consents(buyer_workspace_id)',
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_merchants_public ON merchants(public_id)',
   'CREATE INDEX IF NOT EXISTS idx_merchants_ws ON merchants(workspace_id)',
   'CREATE INDEX IF NOT EXISTS idx_orders_ws ON orders(workspace_id)',

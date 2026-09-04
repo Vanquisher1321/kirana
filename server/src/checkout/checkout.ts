@@ -10,6 +10,12 @@ import { ensureAgent } from './agents.ts';
 import { getMerchant } from '../catalog/store.ts';
 import { createOrder, createPaymentLink, RazorpayError, CircuitOpenError, type CallOptions } from '../razorpay/client.ts';
 
+/** Whoever approved the spend, when the connection itself did not say. */
+function consentBuyer(consentId: string): string | null {
+  const r = db.prepare('SELECT buyer_workspace_id AS w FROM consents WHERE id = ?').get(consentId) as { w?: string | null } | undefined;
+  return (r?.w as string | null) ?? null;
+}
+
 export interface CheckoutInput {
   quoteId: string;
   consentId: string;
@@ -18,6 +24,12 @@ export interface CheckoutInput {
   /** True only when the caller presented a matching agent key. */
   identityProven?: boolean;
   idempotencyKey: string;
+  /**
+   * The workspace of the PERSON buying, when the connection knows one. A buyer
+   * link does; a per-shop link handed to a stranger's assistant does not, and
+   * that order simply belongs to the merchant as it always did.
+   */
+  buyerWorkspaceId?: string | null;
   buyerNote?: string;
   rzpOptions?: CallOptions;
 }
@@ -88,10 +100,13 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutOutcome> {
   try {
     db.prepare(
       `INSERT INTO orders (id, merchant_id, quote_id, consent_id, agent_id, idempotency_key,
-                           amount_minor, currency, status, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?, 'created', ?, ?)`,
+                           amount_minor, currency, status, created_at, updated_at, buyer_workspace_id)
+       VALUES (?,?,?,?,?,?,?,?, 'created', ?, ?, ?)`,
     ).run(orderId, input.merchantId, quote.id, input.consentId, input.agentId, input.idempotencyKey,
-      quote.totalMinor, quote.currency, nowIso(), nowIso());
+      quote.totalMinor, quote.currency, nowIso(), nowIso(),
+      // The connection may know the buyer (a buyer link does). If it does not,
+      // the approval does: a human approved this from their own console.
+      input.buyerWorkspaceId ?? consentBuyer(input.consentId));
   } catch (err) {
     const existing = db.prepare('SELECT id, status FROM orders WHERE idempotency_key = ?').get(input.idempotencyKey) as Record<string, unknown> | undefined;
     if (!existing) {
@@ -281,10 +296,14 @@ export function listOrders(limit = 50, workspaceId?: string | null): Record<stri
   if (workspaceId === undefined) {
     return db.prepare('SELECT * FROM orders ORDER BY created_at DESC LIMIT ?').all(limit) as Record<string, unknown>[];
   }
+  // Two ways an order is yours: you sold it, or you bought it. The join alone
+  // only ever answered the first, which made a shopper's own purchases
+  // invisible to them the moment they shopped somebody else's shop.
   return db.prepare(
     `SELECT o.* FROM orders o JOIN merchants m ON m.id = o.merchant_id
-     WHERE m.workspace_id IS ? ORDER BY o.created_at DESC LIMIT ?`,
-  ).all(workspaceId, limit) as Record<string, unknown>[];
+     WHERE m.workspace_id IS ? OR o.buyer_workspace_id IS ?
+     ORDER BY o.created_at DESC LIMIT ?`,
+  ).all(workspaceId, workspaceId, limit) as Record<string, unknown>[];
 }
 
 /** Applied by the Razorpay webhook once a real payment lands. */

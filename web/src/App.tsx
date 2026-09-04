@@ -103,23 +103,62 @@ export default function App() {
     })();
   }, []);
 
-  /**
-   * No polling. At all.
-   *
-   * This used to fetch seven endpoints every three seconds from every open
-   * tab. On Render's free tier that spends the 5 GB bandwidth allowance and
-   * the 750 instance-hours at the same time, and a polling tab never lets the
-   * service go idle -- so the thing most likely to take this site down before
-   * it is judged was the site refreshing itself.
-   *
-   * A one-minute cold start is a cost a reviewer understands and forgives. A
-   * suspended service is not. So data loads once, and reloads when the person
-   * does something or asks for it: every action already calls refresh(), and
-   * the header carries a manual one with the time of the last read.
-   */
   useEffect(() => {
     if (!session?.role) return;
     void refresh();
+  }, [refresh, session?.role]);
+
+  /**
+   * Live only while someone is watching.
+   *
+   * This used to poll seven endpoints every three seconds from every open tab,
+   * which on Render's free tier spends the bandwidth allowance and the 750
+   * instance-hours at once -- and a polling tab never lets the service go idle,
+   * so the thing most likely to take the site down before it was judged was the
+   * site refreshing itself. The fix for that was to stop polling entirely, and
+   * it went too far: an approval arrives from an assistant, not from anything
+   * you did, so the one screen that must not wait for a click is the one that
+   * asks you to approve a payment. Watching a request sit invisible until you
+   * press refresh is not a saving, it is a broken product.
+   *
+   * So it polls, under two conditions that answer the original objection
+   * exactly. It stops the moment the tab is hidden -- a backgrounded tab is
+   * what actually holds an instance awake, and it is also the tab nobody is
+   * reading. And a visible tab left alone stops after ten minutes, restarting
+   * when it is looked at again, so a forgotten window cannot keep the service
+   * up all night.
+   */
+  useEffect(() => {
+    if (!session?.role) return;
+    const EVERY_MS = 5_000;
+    const IDLE_STOP_MS = 10 * 60 * 1000;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let awakeSince = Date.now();
+
+    const wake = () => {
+      if (document.visibilityState === 'visible') {
+        awakeSince = Date.now();
+        void refresh();
+      }
+    };
+    document.addEventListener('visibilitychange', wake);
+
+    const tick = () => {
+      if (cancelled) return;
+      const watching = document.visibilityState === 'visible';
+      const fresh = Date.now() - awakeSince < IDLE_STOP_MS;
+      if (watching && fresh) void refresh();
+      timer = setTimeout(tick, EVERY_MS);
+    };
+    timer = setTimeout(tick, EVERY_MS);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', wake);
+    };
   }, [refresh, session?.role]);
 
   function go(p: Persona) {
@@ -200,12 +239,12 @@ export default function App() {
         <div style={{ flex: 1 }} />
 
         <div className="row" style={{ gap: 8 }}>
-          {/* Nothing refreshes itself, so the page has to say how old it is and
-              give you a way to ask again. A screen that quietly shows stale
-              numbers is worse than one that admits its age. */}
+          {/* It refreshes itself while you are watching, and stops when you are
+              not. The button stays because the age of the data is worth stating
+              either way, and because a stopped tab needs a way back. */}
           <button
             className="reviewbtn"
-            title="Nothing polls in the background — this reads the server once"
+            title="Updates every few seconds while this tab is visible. Click to read now."
             disabled={reloading}
             onClick={() => { setReloading(true); void refresh().finally(() => setReloading(false)); }}
           >

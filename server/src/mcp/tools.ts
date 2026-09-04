@@ -28,6 +28,8 @@ export interface ToolContext {
    * shop outside the list reads as not-found, the same answer a stranger gets.
    */
   shopIds?: string[];
+  /** The workspace of the person this connection belongs to, on a buyer link. */
+  buyerWorkspaceId?: string | null;
   agentId: string | null;
   /** True only when the caller presented a matching agent key. */
   identityProven: boolean;
@@ -303,8 +305,9 @@ export function toolRequestApproval(ctx: ToolContext, args: { quote_id: string; 
 
   try {
     const c = requestConsent({
-      quoteId: q.id, agentId: ctx.agentId, capMinor, scope: ctx.merchantId,
+      quoteId: q.id, agentId: ctx.agentId, capMinor, scope: q.merchantId,
       identityProven: ctx.identityProven,
+      buyerWorkspaceId: ctx.buyerWorkspaceId ?? null,
     });
     // A standing rule may already have answered. Telling the agent to go and
     // wait for a human when the human decided last Tuesday would send it into
@@ -387,6 +390,7 @@ export async function toolCheckout(ctx: ToolContext, args: { quote_id: string; c
     agentId: ctx.agentId,
     identityProven: ctx.identityProven,
     idempotencyKey: key,
+    buyerWorkspaceId: ctx.buyerWorkspaceId ?? null,
   });
 
   if (!out.ok) {

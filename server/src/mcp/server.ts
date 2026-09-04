@@ -74,8 +74,8 @@ export function buildMcpServer(merchant: Merchant, agentId: string | null, ident
  * It carries no shop's own words in its instructions, because it speaks for
  * several shops at once and none of them get to describe the connection.
  */
-export function buildBuyerMcpServer(shops: Merchant[], agentId: string | null, identityProven = false): McpServer {
-  const ctx: ToolContext = { merchantId: '', shopIds: shops.map((m) => m.id), agentId, identityProven };
+export function buildBuyerMcpServer(shops: Merchant[], agentId: string | null, identityProven = false, buyerWorkspaceId: string | null = null): McpServer {
+  const ctx: ToolContext = { merchantId: '', shopIds: shops.map((m) => m.id), buyerWorkspaceId, agentId, identityProven };
   // Named, but not without limit. These names are text the shops wrote about
   // themselves and they land in the instruction block, which is the highest-
   // privilege position in the whole connection. Sanitised individually, capped

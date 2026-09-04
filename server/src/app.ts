@@ -634,7 +634,7 @@ export function buildApp(): FastifyInstance {
   app.post('/api/approvals/:id/approve', async (request, reply) => {
     const { id } = request.params as { id: string };
     if (!ownsViaShop(request as never, consentWorkspace(id))) return reply.code(404).send({ error: 'not_found' });
-    try { return approveConsent(id, approver(request as never)); }
+    try { return approveConsent(id, approver(request as never), ws(request as never)); }
     catch (err) {
       if (err instanceof ConsentError) return reply.code(409).send({ error: err.code, message: err.message });
       throw err;
@@ -996,7 +996,7 @@ export function buildApp(): FastifyInstance {
     const identityProven = (request as unknown as { identityProven?: boolean }).identityProven === true;
     ensureAgent(agentId, undefined, workspaceId);
 
-    const server = buildBuyerMcpServer(shops, agentId, identityProven);
+    const server = buildBuyerMcpServer(shops, agentId, identityProven, workspaceId);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     reply.raw.on('close', () => { void transport.close(); void server.close(); });
     await server.connect(transport);

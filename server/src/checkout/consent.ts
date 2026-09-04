@@ -58,6 +58,8 @@ export function requestConsent(input: {
    * name", which is the question an impostor wants asked.
    */
   identityProven?: boolean;
+  /** The workspace of the person buying, when the connection knows one. */
+  buyerWorkspaceId?: string | null;
 }): Consent {
   if (!Number.isSafeInteger(input.capMinor) || input.capMinor <= 0) {
     throw new ConsentError('bad_cap', 'A spending cap must be a positive whole number of paise.');
@@ -98,11 +100,12 @@ export function requestConsent(input: {
     consent.grantedBy = match.rule.createdBy;
     consent.grantedAt = new Date(now).toISOString();
     db.prepare(
-      `INSERT INTO consents (id, quote_id, agent_id, cap_minor, scope, granted_by, granted_at, expires_at, revoked_at, status, standing_rule_id)
-       VALUES (?,?,?,?,?,?,?,?,NULL,'granted',?)`,
+      `INSERT INTO consents (id, quote_id, agent_id, cap_minor, scope, granted_by, granted_at, expires_at, revoked_at, status, standing_rule_id, buyer_workspace_id)
+       VALUES (?,?,?,?,?,?,?,?,NULL,'granted',?,?)`,
     ).run(
       consent.id, consent.quoteId, consent.agentId, consent.capMinor, consent.scope,
       consent.grantedBy, consent.grantedAt, consent.expiresAt, match.rule.id,
+      input.buyerWorkspaceId ?? null,
     );
 
     // Its own action, never plain `consent.granted`. Someone reading The Record
@@ -126,9 +129,10 @@ export function requestConsent(input: {
   }
 
   db.prepare(
-    `INSERT INTO consents (id, quote_id, agent_id, cap_minor, scope, granted_by, granted_at, expires_at, revoked_at, status)
-     VALUES (?,?,?,?,?,'','',?,NULL,'pending')`,
-  ).run(consent.id, consent.quoteId, consent.agentId, consent.capMinor, consent.scope, consent.expiresAt);
+    `INSERT INTO consents (id, quote_id, agent_id, cap_minor, scope, granted_by, granted_at, expires_at, revoked_at, status, buyer_workspace_id)
+     VALUES (?,?,?,?,?,'','',?,NULL,'pending',?)`,
+  ).run(consent.id, consent.quoteId, consent.agentId, consent.capMinor, consent.scope, consent.expiresAt,
+    input.buyerWorkspaceId ?? null);
 
   record({
     actor: input.agentId ? `agent:${input.agentId}` : 'agent:anonymous',
@@ -141,12 +145,20 @@ export function requestConsent(input: {
 }
 
 /** Human-only. Turns a pending request into a live approval. */
-export function approveConsent(consentId: string, by: string): Consent {
+export function approveConsent(consentId: string, by: string, buyerWorkspaceId: string | null = null): Consent {
   const c = getConsent(consentId);
   if (!c) throw new ConsentError('not_found', `No approval request ${consentId}.`);
   if (c.status !== 'pending') throw new ConsentError('not_pending', `Request is already ${c.status}.`);
   const at = nowIso();
   db.prepare("UPDATE consents SET status='granted', granted_by=?, granted_at=? WHERE id=?").run(by, at, consentId);
+  // The person who approved the spend is the buyer, and on a per-shop link this
+  // is the only moment anyone learns that. Without it their own purchase is
+  // invisible to them the moment the shop belongs to somebody else -- or to
+  // nobody, which is what the sandbox's seeded shop is.
+  if (buyerWorkspaceId) {
+    db.prepare('UPDATE consents SET buyer_workspace_id = ? WHERE id = ? AND buyer_workspace_id IS NULL')
+      .run(buyerWorkspaceId, consentId);
+  }
   record({
     actor: `human:${by}`, action: 'consent.granted', subjectId: consentId, outcome: 'ok',
     detail: { quoteId: c.quoteId, capMinor: c.capMinor, scope: c.scope, expiresAt: c.expiresAt, agentId: c.agentId },
@@ -185,9 +197,10 @@ export function listPendingConsents(workspaceId?: string | null): Consent[] {
         `SELECT c.* FROM consents c
          JOIN quotes q ON q.id = c.quote_id
          JOIN merchants m ON m.id = q.merchant_id
-         WHERE c.status='pending' AND (m.workspace_id IS ? OR m.workspace_id IS NULL)
+         WHERE c.status='pending'
+           AND (m.workspace_id IS ? OR m.workspace_id IS NULL OR c.buyer_workspace_id IS ?)
          ORDER BY c.expires_at ASC`,
-      ).all(workspaceId);
+      ).all(workspaceId, workspaceId);
   return (rows as Record<string, unknown>[]).map(rowToConsent);
 }
 
