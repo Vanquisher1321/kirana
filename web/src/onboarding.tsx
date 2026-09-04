@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from './api.ts';
 import { Card, Check, PageHead } from './ui.tsx';
 import type { PersonaProps } from './App.tsx';
@@ -50,7 +50,7 @@ function Step({ n, title, done, last, children }: {
 }
 
 /** The one instruction nobody else spells out: what to DO with the link. */
-function UseThisLink({ url }: { url: string }) {
+function UseThisLink({ url, covers }: { url: string; covers?: number }) {
   const [copied, setCopied] = useState(false);
   return (
     <>
@@ -73,6 +73,10 @@ function UseThisLink({ url }: { url: string }) {
         connects to an outside service. Paste it wherever your assistant accepts a custom
         connector. In Claude that is <strong>Customize -&gt; Connectors -&gt; Add custom
         connector</strong>: paste the link, click Add. Nothing to install, no API key, no code.
+        {covers !== undefined && (
+          <> This one link covers {covers === 1 ? 'your shop' : `all ${covers} of your shops`}, and any
+          you add later — you only ever add it once.</>
+        )}
       </div>
       <div className="tiny dim" style={{ marginTop: 8 }}>
         Then just ask it to buy something, in words: "find me a coffee under 800 rupees and buy it".
@@ -162,6 +166,13 @@ export function ShopperStart({ data, refresh, onBlocked }: PersonaProps) {
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // The guide used to teach the per-shop link while the Shops page offered the
+  // buyer link, so the two screens disagreed about the single most important
+  // instruction in the product. A shopper wants the one that covers every shop.
+  const [buyerLink, setBuyerLink] = useState<string | null>(null);
+  useEffect(() => {
+    void api.buyerLink().then((r) => setBuyerLink(r.url)).catch(() => {});
+  }, [data.merchants.length]);
 
   const shops = [...data.merchants].sort((a, b) => b.products - a.products);
   const chosen = shops[0];
@@ -209,9 +220,9 @@ export function ShopperStart({ data, refresh, onBlocked }: PersonaProps) {
           {err && <div className="tiny" style={{ marginTop: 8 }}>{err}</div>}
         </Step>
 
-        <Step n={2} title="Give the shop's link to your assistant" done={hasAsked}>
-          {chosen
-            ? <UseThisLink url={chosen.mcpUrl} />
+        <Step n={2} title="Give your assistant one link" done={hasAsked}>
+          {buyerLink
+            ? <UseThisLink url={buyerLink} covers={shops.length} />
             : <div className="tiny dim">Appears here once there is a shop to buy from.</div>}
         </Step>
 
