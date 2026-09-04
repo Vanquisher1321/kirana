@@ -347,6 +347,14 @@ Stated here rather than discovered by a reviewer.
 - **A hostile merchant could attempt prompt injection** against a buyer agent
   through a product description. Product text is stripped of markup, but this is
   unsolved industry-wide and is not solved here.
+- **One connector per shop.** A shopper who wants five shops adds five
+  connectors. That is friction, and it is the honest consequence of the security
+  model rather than an oversight: the unguessable `shp_` id in each URL *is* the
+  capability, so one link that reaches many shops would be a capability over a
+  set rather than a shop. Fixing it properly means a merchant argument on all
+  eight tools and a decision about what that broader link is allowed to reach —
+  a different trust model, not a convenience tweak, and not something to ship
+  the day before a deadline.
 - **Rate limits are in memory** and do not survive a restart or span instances.
 - **UAP is not implemented.** It is not publicly specified and still needs RBI
   approval. Kirana models the *consent shape* — bounded, scoped, expiring,
@@ -356,4 +364,7 @@ Stated here rather than discovered by a reviewer.
 
 ## Licence
 
-MIT. Built for the Razorpay AI Buildathon, 2026.
+All rights reserved. Built for the Razorpay AI Buildathon, 2026.
+
+Public so it can be read, cloned and run for review. No licence is granted for
+commercial use — get in touch if you want one.
