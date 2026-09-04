@@ -353,19 +353,37 @@ export function settleOrder(input: {
   // once, retried and succeeded ended with money captured and a ledger saying
   // they never paid. The reconciler asserted the rule in a test; the webhook
   // broke it untested.
-  if (input.status === 'failed' && (String(row.status) === 'paid' || String(row.status) === 'awaiting_payment')) {
-    const wasPaid = String(row.status) === 'paid';
-    db.prepare("UPDATE orders SET failure_reason = ?, updated_at = ? WHERE id = ?")
-      .run(`last attempt failed: ${input.failureReason ?? 'no reason given'}`, nowIso(), orderId);
+  //
+  // `mismatch` belongs in that list too, and was missing from it. A short
+  // capture parks the order there deliberately -- money arrived, the amount is
+  // wrong, a human has to look -- and the failure notice for the customer's
+  // EARLIER abandoned attempt then fell through to the unconditional UPDATE
+  // and rewrote it as `failed`. Same loss, one state along: money captured, a
+  // terminal row saying the customer never paid, and the diagnosis in
+  // `failure_reason` overwritten with an OTP error. A state that exists to
+  // summon a human must not be erasable by an event that arrived late.
+  const settled = String(row.status) === 'paid' || String(row.status) === 'mismatch';
+  if (input.status === 'failed' && (settled || String(row.status) === 'awaiting_payment')) {
+    const was = String(row.status);
+    if (settled) {
+      // Status and failure_reason are both left alone: on a mismatch that
+      // column holds the amount discrepancy, which is the whole reason the row
+      // is waiting for someone.
+      db.prepare('UPDATE orders SET updated_at = ? WHERE id = ?').run(nowIso(), orderId);
+    } else {
+      db.prepare('UPDATE orders SET failure_reason = ?, updated_at = ? WHERE id = ?')
+        .run(`last attempt failed: ${input.failureReason ?? 'no reason given'}`, nowIso(), orderId);
+    }
     record({
       actor: 'razorpay:webhook',
-      action: wasPaid ? 'settlement.late_failure_ignored' : 'payment.attempt_failed',
+      action: settled ? 'settlement.late_failure_ignored' : 'payment.attempt_failed',
       subjectId: orderId, outcome: 'ok',
       detail: {
         paymentId: input.paymentId,
         failureReason: input.failureReason ?? null,
-        note: wasPaid
-          ? 'A failed attempt arrived for an order that is already paid. Ignored; the capture stands.'
+        orderStatus: was,
+        note: settled
+          ? `A failed attempt arrived for an order that is already ${was}. Ignored; what the gateway captured stands.`
           : 'An attempt failed. The order stays open so the customer can retry the same link.',
       },
     });

@@ -142,6 +142,51 @@ test('events we do not act on still return 200 so Razorpay stops retrying', asyn
   assert.ok(auditList(200).some((r) => r.action === 'webhook.ignored'));
 });
 
+test('a late failure cannot erase a mismatch that is waiting for a human', async () => {
+  // A short capture parks the order in `mismatch`: money arrived, the amount is
+  // wrong, somebody has to look. Razorpay then delivers the failure notice for
+  // the attempt the customer abandoned BEFORE that -- delivery is concurrent,
+  // not ordered -- and that used to fall through to the unconditional UPDATE
+  // and rewrite the row as `failed`. `failed` is terminal (the reconciler only
+  // sweeps `awaiting_payment`), so the captured money was left with a ledger
+  // saying the customer never paid, and the amount discrepancy in
+  // `failure_reason` was overwritten with an OTP error.
+  const rzpTwo = async (url: string | URL) => {
+    const u = String(url);
+    if (u.endsWith('/orders')) return new Response(JSON.stringify({ id: 'order_WH2', amount: 99800, currency: 'INR', status: 'created' }), { headers: { 'content-type': 'application/json' } });
+    if (u.endsWith('/payment_links')) return new Response(JSON.stringify({ id: 'plink_WH2', short_url: 'https://rzp.io/i/wh2', status: 'created', amount: 99800 }), { headers: { 'content-type': 'application/json' } });
+    return new Response('{}', { headers: { 'content-type': 'application/json' } });
+  };
+  const merchantId = getMerchant('bluehill-example')!.id;
+  const attikan = searchCatalog(merchantId, { query: 'attikan' })[0]!;
+  const variant = attikan.variants.find((v) => v.priceMinor === 49900)!;
+  const q = createQuote(merchantId, [{ variantId: variant.id, quantity: 2 }]);
+  const c = grantConsent({ quoteId: q.id, agentId: null, capMinor: 200000, scope: 's', grantedBy: 'om' });
+  const out = await checkout({
+    quoteId: q.id, consentId: c.id, merchantId, agentId: null,
+    idempotencyKey: 'wh-2', rzpOptions: { fetchImpl: rzpTwo as never },
+  });
+  const shortPaid = out.orderId!;
+
+  await post({
+    event: 'payment.captured',
+    payload: { payment: { entity: { id: 'pay_WH2_SHORT', order_id: 'order_WH2', amount: 100, currency: 'INR', status: 'captured' } } },
+  });
+  assert.equal(getOrder(shortPaid)!.status, 'mismatch', 'a short capture must park the order for a human');
+  const diagnosis = String(getOrder(shortPaid)!.failure_reason);
+
+  const res = await post({
+    event: 'payment.failed',
+    payload: { payment: { entity: { id: 'pay_WH2_EARLIER', order_id: 'order_WH2', error_code: 'BAD_REQUEST_ERROR', error_description: 'OTP incorrect' } } },
+  });
+  assert.equal(res.status, 200);
+  const after = getOrder(shortPaid)!;
+  assert.equal(after.status, 'mismatch', 'the late failure must not close a row that is holding captured money');
+  assert.equal(after.failure_reason, diagnosis, 'the amount discrepancy must survive the late failure');
+  assert.equal(after.razorpay_payment_id, 'pay_WH2_SHORT', 'the captured payment id must not be replaced by a failed attempt');
+  assert.ok(auditList(200).some((r) => r.action === 'settlement.late_failure_ignored'));
+});
+
 test('the audit chain survives every webhook path', () => {
   assert.equal(verify().ok, true);
 });
